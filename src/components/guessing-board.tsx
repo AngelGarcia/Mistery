@@ -60,7 +60,7 @@ export function GuessingBoard({
 
               <Select onValueChange={(value) => handleGuessChange(phrase.id, value)}>
                 <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Who said this?" />
+                  <SelectValue placeholder="¿Quién dijo esto?" />
                 </SelectTrigger>
                 <SelectContent>
                   {players.map((player) => (
@@ -82,11 +82,11 @@ export function GuessingBoard({
           className="bg-accent hover:bg-accent/90"
         >
           <Send className="mr-2" />
-          Reveal Answers
+          Revelar Respuestas
         </Button>
         {!allPhrasesGuessed && (
           <p className="text-sm text-muted-foreground mt-2">
-            Make a guess for every phrase to continue.
+            Adivina cada frase para continuar.
           </p>
         )}
       </div>

@@ -3,7 +3,14 @@
 import type { Player, Phrase, Guess } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { CheckCircle2, XCircle, RefreshCw, User, Trophy, Loader2 } from "lucide-react";
+import {
+  CheckCircle2,
+  XCircle,
+  RefreshCw,
+  User,
+  Trophy,
+  Loader2,
+} from "lucide-react";
 import { Separator } from "@/components/ui/separator";
 import { useState, useEffect } from "react";
 
@@ -36,13 +43,13 @@ export function ResultsDisplay({
   }, [guesses, phrases]);
 
   const getPlayerName = (id: string) =>
-    players.find((p) => p.id === id)?.name || "Unknown";
+    players.find((p) => p.id === id)?.name || "Desconocido";
 
   if (loading) {
     return (
       <div className="flex flex-col items-center justify-center gap-4 py-16">
         <Loader2 className="h-12 w-12 animate-spin text-primary" />
-        <p className="text-muted-foreground">Calculating your score...</p>
+        <p className="text-muted-foreground">Calculando tu puntuación...</p>
       </div>
     );
   }
@@ -51,7 +58,7 @@ export function ResultsDisplay({
     <div className="space-y-8">
       <div className="text-center bg-muted/50 p-6 rounded-lg">
         <Trophy className="w-12 h-12 mx-auto text-accent mb-2" />
-        <h2 className="text-3xl font-bold text-primary">Your Score</h2>
+        <h2 className="text-3xl font-bold text-primary">Tu Puntuación</h2>
         <p className="text-5xl font-bold text-accent">
           {score}{" "}
           <span className="text-3xl text-muted-foreground">
@@ -82,7 +89,7 @@ export function ResultsDisplay({
                 <div className="space-y-2 text-sm">
                   <div className="flex items-center gap-2">
                     <User className="h-4 w-4 text-primary" />
-                    <strong>Author:</strong>
+                    <strong>Autor:</strong>
                     <span className="font-semibold text-primary">
                       {getPlayerName(phrase.authorId)}
                     </span>
@@ -93,13 +100,15 @@ export function ResultsDisplay({
                     ) : (
                       <XCircle className="h-4 w-4 text-destructive" />
                     )}
-                    <strong>Your Guess:</strong>
+                    <strong>Tu Adivinanza:</strong>
                     <span
                       className={
                         isCorrect ? "text-primary" : "text-destructive"
                       }
                     >
-                      {guessedPlayerId ? getPlayerName(guessedPlayerId) : "No guess"}
+                      {guessedPlayerId
+                        ? getPlayerName(guessedPlayerId)
+                        : "No adivinaste"}
                     </span>
                   </div>
                 </div>
@@ -112,7 +121,7 @@ export function ResultsDisplay({
       <div className="text-center mt-8">
         <Button size="lg" onClick={onPlayAgain} variant="outline">
           <RefreshCw className="mr-2" />
-          Play Again
+          Jugar de Nuevo
         </Button>
       </div>
     </div>

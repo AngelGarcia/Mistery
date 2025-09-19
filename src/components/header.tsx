@@ -6,7 +6,7 @@ export function Header() {
       <div className="container mx-auto flex h-16 items-center px-4">
         <UserSearch className="h-8 w-8 mr-3" />
         <h1 className="text-2xl font-bold tracking-tight font-headline">
-          Mystery Match
+          Juego de Misterio
         </h1>
       </div>
     </header>

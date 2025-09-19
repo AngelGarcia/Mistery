@@ -106,18 +106,19 @@ export function GameManager() {
   const phaseConfig = {
     setup: {
       icon: <Users className="h-6 w-6" />,
-      title: "Game Setup",
-      description: "Add players and their secret phrases to begin.",
+      title: "Configuración del Juego",
+      description: "Añade jugadores y sus frases secretas para empezar.",
     },
     guessing: {
       icon: <Swords className="h-6 w-6" />,
-      title: "Who is Who?",
-      description: "Guess which phrase belongs to which player.",
+      title: "¿Quién es Quién?",
+      description: "Adivina a qué jugador pertenece cada frase.",
     },
     results: {
       icon: <Trophy className="h-6 w-6" />,
-      title: "The Reveal!",
-      description: "See how well you did and who the mystery authors are.",
+      title: "¡La Revelación!",
+      description:
+        "Mira qué tal lo hiciste y quiénes son los autores misteriosos.",
     },
   };
 

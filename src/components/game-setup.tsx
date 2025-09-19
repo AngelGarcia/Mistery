@@ -98,6 +98,7 @@ export function GameSetup({
       form.reset();
       setIsOpen(false);
     } catch (error) {
+      console.error(error);
       toast({
         variant: "destructive",
         title: "¡Oh no! Algo salió mal.",

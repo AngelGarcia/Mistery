@@ -3,8 +3,9 @@
 import type { Player, Phrase, Guess } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { CheckCircle2, XCircle, RefreshCw, User, Trophy } from "lucide-react";
+import { CheckCircle2, XCircle, RefreshCw, User, Trophy, Loader2 } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
+import { useState, useEffect } from "react";
 
 interface ResultsDisplayProps {
   players: Player[];
@@ -19,16 +20,32 @@ export function ResultsDisplay({
   guesses,
   onPlayAgain,
 }: ResultsDisplayProps) {
+  const [loading, setLoading] = useState(true);
+  const [score, setScore] = useState(0);
+
+  useEffect(() => {
+    const calculatedScore = guesses.reduce((acc, guess) => {
+      const phrase = phrases.find((p) => p.id === guess.phraseId);
+      if (phrase && phrase.authorId === guess.guessedPlayerId) {
+        return acc + 1;
+      }
+      return acc;
+    }, 0);
+    setScore(calculatedScore);
+    setLoading(false);
+  }, [guesses, phrases]);
+
   const getPlayerName = (id: string) =>
     players.find((p) => p.id === id)?.name || "Unknown";
 
-  const score = guesses.reduce((acc, guess) => {
-    const phrase = phrases.find((p) => p.id === guess.phraseId);
-    if (phrase && phrase.authorId === guess.guessedPlayerId) {
-      return acc + 1;
-    }
-    return acc;
-  }, 0);
+  if (loading) {
+    return (
+      <div className="flex flex-col items-center justify-center gap-4 py-16">
+        <Loader2 className="h-12 w-12 animate-spin text-primary" />
+        <p className="text-muted-foreground">Calculating your score...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-8">

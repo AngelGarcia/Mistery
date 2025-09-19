@@ -34,7 +34,9 @@ const anonymizePhrasesPrompt = ai.definePrompt({
   prompt: `You are an expert at anonymizing text. You will be given an array of phrases and you will return an array of anonymized phrases. The anonymized phrases should not be identifiable to the original author based on writing style or topics.  Try to keep the meaning of the phrase the same while changing the words.
 
 Phrases:
-{{#each phrases}}{{{this}}}\n{{/each}}`,
+{{#each phrases}}
+- {{{this}}}
+{{/each}}`,
 });
 
 const anonymizePhrasesFlow = ai.defineFlow(

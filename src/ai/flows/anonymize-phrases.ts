@@ -34,7 +34,10 @@ const anonymizePhrasesPrompt = ai.definePrompt({
   prompt: `You are an expert at anonymizing text. You will be given an array of phrases.
 Your task is to rewrite them to obscure the original author's writing style and specific topics, while preserving the core meaning.
 
-VERY IMPORTANT: You must only output a valid JSON object containing a single key "anonymizedPhrases", which holds an array of the anonymized strings. Do not include any other text, markdown, or explanations in your response.
+IMPORTANT: Your response MUST be a valid JSON object. It should contain a single key "anonymizedPhrases", which is an array of strings. Do not output any other text, markdown, or explanations before or after the JSON object.
+
+Example Input: { "phrases": ["I love hiking in the mountains every weekend.", "My favorite food is sushi."] }
+Example Output: { "anonymizedPhrases": ["This person enjoys outdoor activities in elevated terrains.", "They have a preference for a certain type of Japanese cuisine."] }
 
 Phrases to anonymize:
 {{#each phrases}}
@@ -50,6 +53,9 @@ const anonymizePhrasesFlow = ai.defineFlow(
   },
   async input => {
     const {output} = await anonymizePhrasesPrompt(input);
-    return output!;
+    if (!output) {
+      throw new Error("The AI model did not return a valid output.");
+    }
+    return output;
   }
 );

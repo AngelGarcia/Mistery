@@ -75,10 +75,30 @@ export function GameSetup({
 
   async function onSubmit(values: z.infer<typeof formSchema>) {
     setIsSubmitting(true);
+    let anonymizedPhrases: string[] = [];
     try {
       const originalPhrases = values.phrases.map((p) => p.value);
-      const anonymizedPhrases = await getAnonymizedPhrases(originalPhrases);
+      anonymizedPhrases = await getAnonymizedPhrases(originalPhrases);
 
+       if (!anonymizedPhrases || anonymizedPhrases.length === 0) {
+        throw new Error("AI anonymization failed or returned empty.");
+      }
+
+      toast({
+        title: "¡Frases Anonimizadas por IA!",
+        description: "La IA ha reescrito tus frases para mantener el misterio.",
+      });
+
+    } catch (error) {
+      console.error(error);
+      toast({
+        variant: "destructive",
+        title: "La IA falló, ¡pero el juego sigue!",
+        description: "Usaremos tus frases originales. ¡El misterio continúa!",
+      });
+      // Fallback: use original phrases if AI fails
+      anonymizedPhrases = values.phrases.map(p => p.value);
+    } finally {
       const newPlayer: Player = {
         id: crypto.randomUUID(),
         name: values.name,
@@ -91,21 +111,13 @@ export function GameSetup({
       }));
 
       onPlayerAdd(newPlayer, newPhrases);
-      toast({
+      form.reset();
+      setIsOpen(false);
+      setIsSubmitting(false);
+       toast({
         title: "¡Jugador Añadido!",
         description: `${values.name} y sus frases misteriosas están en el juego.`,
       });
-      form.reset();
-      setIsOpen(false);
-    } catch (error) {
-      console.error(error);
-      toast({
-        variant: "destructive",
-        title: "¡Oh no! Algo salió mal.",
-        description: "No se pudieron anonimizar las frases. Por favor, inténtalo de nuevo.",
-      });
-    } finally {
-      setIsSubmitting(false);
     }
   }
 
@@ -145,8 +157,8 @@ export function GameSetup({
             <DialogHeader>
               <DialogTitle>Añadir un Nuevo Jugador</DialogTitle>
               <DialogDescription>
-                Introduce tu nombre y hasta 3 frases sobre ti. ¡La IA las
-                anonimizará!
+                Introduce tu nombre y hasta 3 frases. ¡La IA intentará
+                anonimizarlas!
               </DialogDescription>
             </DialogHeader>
             <Form {...form}>

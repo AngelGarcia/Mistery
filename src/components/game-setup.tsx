@@ -4,8 +4,6 @@ import { useState } from "react";
 import { useForm, useFieldArray } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { getAnonymizedPhrases } from "@/app/actions";
-import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -28,6 +26,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { UserPlus, Play, Loader2, User, Trash2, Users } from "lucide-react";
 import type { Player, Phrase } from "@/lib/types";
+import { useToast } from "@/hooks/use-toast";
 
 const formSchema = z.object({
   name: z
@@ -75,50 +74,26 @@ export function GameSetup({
 
   async function onSubmit(values: z.infer<typeof formSchema>) {
     setIsSubmitting(true);
-    let anonymizedPhrases: string[] = [];
-    try {
-      const originalPhrases = values.phrases.map((p) => p.value);
-      anonymizedPhrases = await getAnonymizedPhrases(originalPhrases);
+    
+    const newPlayer: Player = {
+      id: crypto.randomUUID(),
+      name: values.name,
+    };
 
-       if (!anonymizedPhrases || anonymizedPhrases.length === 0) {
-        throw new Error("AI anonymization failed or returned empty.");
-      }
+    const newPhrases: Phrase[] = values.phrases.map((p) => ({
+      id: crypto.randomUUID(),
+      anonymizedText: p.value, // Using original text
+      authorId: newPlayer.id,
+    }));
 
-      toast({
-        title: "¡Frases Anonimizadas por IA!",
-        description: "La IA ha reescrito tus frases para mantener el misterio.",
-      });
-
-    } catch (error) {
-      console.error(error);
-      toast({
-        variant: "destructive",
-        title: "La IA falló, ¡pero el juego sigue!",
-        description: "Usaremos tus frases originales. ¡El misterio continúa!",
-      });
-      // Fallback: use original phrases if AI fails
-      anonymizedPhrases = values.phrases.map(p => p.value);
-    } finally {
-      const newPlayer: Player = {
-        id: crypto.randomUUID(),
-        name: values.name,
-      };
-
-      const newPhrases: Phrase[] = anonymizedPhrases.map((text) => ({
-        id: crypto.randomUUID(),
-        anonymizedText: text,
-        authorId: newPlayer.id,
-      }));
-
-      onPlayerAdd(newPlayer, newPhrases);
-      form.reset();
-      setIsOpen(false);
-      setIsSubmitting(false);
-       toast({
-        title: "¡Jugador Añadido!",
-        description: `${values.name} y sus frases misteriosas están en el juego.`,
-      });
-    }
+    onPlayerAdd(newPlayer, newPhrases);
+    form.reset();
+    setIsOpen(false);
+    setIsSubmitting(false);
+    toast({
+      title: "¡Jugador Añadido!",
+      description: `${values.name} y sus frases misteriosas están en el juego.`,
+    });
   }
 
   return (
@@ -157,8 +132,7 @@ export function GameSetup({
             <DialogHeader>
               <DialogTitle>Añadir un Nuevo Jugador</DialogTitle>
               <DialogDescription>
-                Introduce tu nombre y hasta 3 frases. ¡La IA intentará
-                anonimizarlas!
+                Introduce tu nombre y hasta 3 frases.
               </DialogDescription>
             </DialogHeader>
             <Form {...form}>

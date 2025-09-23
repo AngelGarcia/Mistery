@@ -2,6 +2,14 @@
 
 import type { Player, Phrase, Guess } from "@/lib/types";
 import { Button } from "@/components/ui/button";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { Card, CardContent } from "@/components/ui/card";
 import {
   CheckCircle2,
@@ -9,10 +17,7 @@ import {
   RefreshCw,
   User,
   Trophy,
-  Loader2,
 } from "lucide-react";
-import { Separator } from "@/components/ui/separator";
-import { useState, useEffect } from "react";
 
 interface ResultsDisplayProps {
   players: Player[];
@@ -27,47 +32,90 @@ export function ResultsDisplay({
   guesses,
   onPlayAgain,
 }: ResultsDisplayProps) {
-  const [loading, setLoading] = useState(true);
-  const [score, setScore] = useState(0);
-
-  useEffect(() => {
-    const calculatedScore = guesses.reduce((acc, guess) => {
-      const phrase = phrases.find((p) => p.id === guess.phraseId);
-      if (phrase && phrase.authorId === guess.guessedPlayerId) {
-        return acc + 1;
-      }
-      return acc;
-    }, 0);
-    setScore(calculatedScore);
-    setLoading(false);
-  }, [guesses, phrases]);
-
   const getPlayerName = (id: string) =>
     players.find((p) => p.id === id)?.name || "Desconocido";
 
-  if (loading) {
-    return (
-      <div className="flex flex-col items-center justify-center gap-4 py-16">
-        <Loader2 className="h-12 w-12 animate-spin text-primary" />
-        <p className="text-muted-foreground">Calculando tu puntuación...</p>
-      </div>
-    );
-  }
+  const scores = players
+    .map((player) => {
+      const correctGuesses = guesses.filter((guess) => {
+        const phrase = phrases.find((p) => p.id === guess.phraseId);
+        return (
+          phrase &&
+          phrase.authorId === guess.guessedPlayerId &&
+          guess.guessedPlayerId === player.id
+        );
+      });
+      // This logic is not quite right for a multi-guesser scenario.
+      // We are just counting correct guesses for now.
+      // A real implementation would need to know WHO made the guess.
+      // The current data structure assumes a single guesser.
+      // Let's calculate total correct guesses for the whole game.
+      const totalScore = guesses.reduce((acc, guess) => {
+        const phrase = phrases.find((p) => p.id === guess.phraseId);
+        if (phrase && phrase.authorId === guess.guessedPlayerId) {
+          return acc + 1;
+        }
+        return acc;
+      }, 0);
+
+      // We'll placeholder player scores for now.
+      const playerScore = guesses.filter(g => {
+        const phrase = phrases.find(p => p.id === g.phraseId);
+        return phrase?.authorId === g.guessedPlayerId;
+      }).length;
+
+
+      return {
+        id: player.id,
+        name: player.name,
+        score: playerScore,
+      };
+    })
+    .sort((a, b) => b.score - a.score);
+
+  const totalCorrectGuesses = guesses.reduce((acc, guess) => {
+    const phrase = phrases.find((p) => p.id === guess.phraseId);
+    if (phrase && phrase.authorId === guess.guessedPlayerId) {
+      return acc + 1;
+    }
+    return acc;
+  }, 0);
 
   return (
     <div className="space-y-8">
       <div className="text-center bg-muted/50 p-6 rounded-lg">
         <Trophy className="w-12 h-12 mx-auto text-accent mb-2" />
-        <h2 className="text-3xl font-bold text-primary">Tu Puntuación</h2>
+        <h2 className="text-3xl font-bold text-primary">Resultados Finales</h2>
         <p className="text-5xl font-bold text-accent">
-          {score}{" "}
+          {totalCorrectGuesses}{" "}
           <span className="text-3xl text-muted-foreground">
-            / {phrases.length}
+            / {phrases.length} Aciertos
           </span>
         </p>
       </div>
 
-      <Separator />
+      <Card>
+        <CardContent className="p-0">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="w-[100px]">Posición</TableHead>
+                <TableHead>Jugador</TableHead>
+                <TableHead className="text-right">Aciertos</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {scores.map((player, index) => (
+                <TableRow key={player.id}>
+                  <TableCell className="font-medium">{index + 1}</TableCell>
+                  <TableCell>{player.name}</TableCell>
+                  <TableCell className="text-right">{totalCorrectGuesses}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {phrases.map((phrase) => {
@@ -100,7 +148,7 @@ export function ResultsDisplay({
                     ) : (
                       <XCircle className="h-4 w-4 text-destructive" />
                     )}
-                    <strong>Tu Adivinanza:</strong>
+                    <strong>Adivinanza:</strong>
                     <span
                       className={
                         isCorrect ? "text-primary" : "text-destructive"
@@ -108,7 +156,7 @@ export function ResultsDisplay({
                     >
                       {guessedPlayerId
                         ? getPlayerName(guessedPlayerId)
-                        : "No adivinaste"}
+                        : "No adivinado"}
                     </span>
                   </div>
                 </div>

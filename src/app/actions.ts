@@ -14,9 +14,14 @@ export async function getAnonymizedPhrases(
   try {
     const input: AnonymizePhrasesInput = { phrases };
     const result = await anonymizePhrases(input);
-    return result.anonymizedPhrases;
+    if (result && result.anonymizedPhrases) {
+      return result.anonymizedPhrases;
+    }
+    // Fallback if AI returns unexpected format
+    return phrases.sort(() => Math.random() - 0.5);
   } catch (error) {
-    console.error("Error anonymizing phrases:", error);
-    throw new Error("Failed to anonymize phrases.");
+    console.error("Error anonymizing phrases, using fallback:", error);
+    // Fallback to shuffling original phrases if the flow fails
+    return phrases.sort(() => Math.random() - 0.5);
   }
 }

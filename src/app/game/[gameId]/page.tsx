@@ -4,13 +4,14 @@ import { useState, useEffect } from 'react';
 import { useParams } from 'next/navigation';
 import { doc, getFirestore, onSnapshot, setDoc, getDoc, updateDoc, arrayUnion, runTransaction } from 'firebase/firestore';
 import { app } from '@/lib/firebase';
-import type { Game, Player } from '@/lib/types';
+import type { Game, Player, Phrase } from '@/lib/types';
+import { getAnonymizedPhrases } from '@/app/actions';
 import { Header } from '@/components/header';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { Users, LogIn, Send, Hourglass, Gamepad2 } from 'lucide-react';
+import { Users, LogIn, Send, Hourglass, Gamepad2, CheckCircle } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 
 const db = getFirestore(app);
@@ -24,6 +25,9 @@ export default function GamePage() {
   const [currentPlayer, setCurrentPlayer] = useState<Player | null>(null);
   const [playerName, setPlayerName] = useState('');
   const [isHost, setIsHost] = useState(false);
+  const [phrase1, setPhrase1] = useState('');
+  const [phrase2, setPhrase2] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
     if (!gameId) return;
@@ -41,15 +45,18 @@ export default function GamePage() {
           setCurrentPlayer(player);
           setIsHost(gameData.hostId === player.id);
         } else {
-            // Player was removed or game was reset, clear local storage
             localStorage.removeItem(`player-id-${gameId}`);
             setCurrentPlayer(null);
             setIsHost(false);
         }
       }
+      
+      // Check if all players have submitted to advance the phase
+      if (gameData?.phase === 'submission' && gameData.players.every(p => p.hasSubmitted)) {
+        updateDoc(gameRef, { phase: 'guessing' });
+      }
     });
 
-    // Ensure the game document exists on first load
     getDoc(gameRef).then(docSnap => {
         if (!docSnap.exists()) {
           const newGame: Game = {
@@ -81,10 +88,9 @@ export default function GamePage() {
           throw "La partida no existe.";
         }
         
-        const gameData = gameDoc.data();
+        const gameData = gameDoc.data() as Game;
         const players = gameData.players || [];
         
-        // Don't allow duplicate names
         if (players.some((p: Player) => p.name === newPlayer.name)) {
             throw new Error(`El nombre "${newPlayer.name}" ya está en uso.`);
         }
@@ -93,7 +99,6 @@ export default function GamePage() {
             players: [...players, newPlayer]
         };
 
-        // The first player to join becomes the host
         if (!gameData.hostId) {
             updateData.hostId = newPlayer.id;
         }
@@ -137,6 +142,53 @@ export default function GamePage() {
             description: "No se pudo iniciar la partida.",
             variant: "destructive",
           });
+    }
+  };
+
+  const handleSubmission = async () => {
+    if (!phrase1.trim() || !phrase2.trim() || !currentPlayer) return;
+    setIsSubmitting(true);
+    
+    try {
+      const originalPhrases = [phrase1, phrase2];
+      const anonymized = await getAnonymizedPhrases(originalPhrases);
+
+      const newPhrases: Phrase[] = anonymized.map((text, index) => ({
+        id: `${currentPlayer.id}-${index}`,
+        anonymizedText: text,
+        authorId: currentPlayer.id,
+      }));
+
+      const gameRef = doc(db, 'games', gameId);
+      await runTransaction(db, async (transaction) => {
+        const gameDoc = await transaction.get(gameRef);
+        if (!gameDoc.exists()) throw new Error("Game not found");
+        
+        const currentPhrases = gameDoc.data().phrases || [];
+        const updatedPlayers = gameDoc.data().players.map((p: Player) => 
+            p.id === currentPlayer.id ? { ...p, hasSubmitted: true } : p
+        );
+
+        transaction.update(gameRef, {
+            phrases: [...currentPhrases, ...newPhrases],
+            players: updatedPlayers
+        });
+      });
+
+      toast({
+        title: "¡Frases enviadas!",
+        description: "Tus frases han sido anonimizadas. Esperando al resto de jugadores...",
+      });
+
+    } catch (error: any) {
+        console.error("Error submitting phrases:", error);
+        toast({
+            title: "Error",
+            description: error.message || "No se pudieron enviar tus frases.",
+            variant: "destructive"
+        });
+    } finally {
+        setIsSubmitting(false);
     }
   };
 
@@ -216,8 +268,36 @@ export default function GamePage() {
         </CardContent>
     </Card>
   );
+  
+  const renderSubmissionStatus = () => (
+     <Card className="w-full max-w-2xl mx-auto">
+        <CardHeader>
+             <CardTitle>Esperando al resto</CardTitle>
+             <CardDescription>La siguiente fase comenzará cuando todos hayan enviado sus frases.</CardDescription>
+        </CardHeader>
+        <CardContent>
+             <ul className="space-y-3">
+                 {game.players.map(p => (
+                     <li key={p.id} className="flex items-center justify-between p-3 bg-primary/10 rounded-lg">
+                         <span className="font-medium">{p.name}</span>
+                         {p.hasSubmitted ? (
+                             <span className="flex items-center gap-2 text-green-600">
+                                 <CheckCircle /> ¡Listo!
+                             </span>
+                         ) : (
+                            <span className="flex items-center gap-2 text-muted-foreground">
+                                <Hourglass className="animate-spin" /> Escribiendo...
+                            </span>
+                         )}
+                     </li>
+                 ))}
+             </ul>
+        </CardContent>
+     </Card>
+  );
 
-  const renderSubmission = () => (
+
+  const renderSubmissionForm = () => (
     <Card className="w-full max-w-2xl mx-auto">
       <CardHeader>
         <CardTitle>Envía tus Frases</CardTitle>
@@ -227,15 +307,37 @@ export default function GamePage() {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        <Textarea placeholder="Primera frase..." />
-        <Textarea placeholder="Segunda frase..." />
-        <Button className="w-full">
-            <Send className="mr-2"/>
-            Enviar Frases
+        <Textarea 
+            placeholder="Primera frase..." 
+            value={phrase1}
+            onChange={e => setPhrase1(e.target.value)}
+            disabled={isSubmitting}
+        />
+        <Textarea 
+            placeholder="Segunda frase..." 
+            value={phrase2}
+            onChange={e => setPhrase2(e.target.value)}
+            disabled={isSubmitting}
+        />
+        <Button onClick={handleSubmission} className="w-full" disabled={!phrase1.trim() || !phrase2.trim() || isSubmitting}>
+            {isSubmitting ? <Hourglass className="mr-2 animate-spin"/> : <Send className="mr-2"/>}
+            {isSubmitting ? 'Enviando...' : 'Enviar Frases'}
         </Button>
       </CardContent>
     </Card>
   );
+  
+  const renderSubmission = () => {
+    const playerHasSubmitted = game.players.find(p => p.id === currentPlayer.id)?.hasSubmitted;
+    return playerHasSubmitted ? renderSubmissionStatus() : renderSubmissionForm();
+  }
+  
+  const renderGuessing = () => (
+    <div className="text-center">
+        <h2 className="text-2xl font-bold">Fase de Adivinanzas</h2>
+        <p>¡Próximamente!</p>
+    </div>
+    );
 
 
   return (
@@ -244,6 +346,7 @@ export default function GamePage() {
        <main className="flex-1 container mx-auto p-4 md:p-8">
         {game.phase === 'lobby' && renderLobby()}
         {game.phase === 'submission' && renderSubmission()}
+        {game.phase === 'guessing' && renderGuessing()}
         {/* Other game phases will be rendered here */}
        </main>
      </div>

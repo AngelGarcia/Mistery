@@ -9,17 +9,17 @@ export type Phrase = {
   authorId: string;
 };
 
-export type PlayerSubmission = {
-  player: Player;
-  phrases: string[];
-};
-
-export type GameData = {
-  players: Player[];
-  phrases: Phrase[];
-};
-
 export type Guess = {
   phraseId: string;
   guessedPlayerId: string;
+};
+
+export type GamePhase = "lobby" | "submission" | "guessing" | "results";
+
+export type Game = {
+  id: string;
+  phase: GamePhase;
+  players: Player[];
+  phrases?: Phrase[];
+  guesses?: Record<string, Guess[]>; // Player ID -> Guesses
 };

@@ -20,6 +20,7 @@ export type Game = {
   id: string;
   phase: GamePhase;
   players: Player[];
+  hostId?: string; // ID of the player who is the host
   phrases?: Phrase[];
   guesses?: Record<string, Guess[]>; // Player ID -> Guesses
 };

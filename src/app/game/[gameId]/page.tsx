@@ -27,6 +27,7 @@ export default function GamePage() {
   const [isHost, setIsHost] = useState(false);
   const [phrase1, setPhrase1] = useState('');
   const [phrase2, setPhrase2] = useState('');
+  const [phrase3, setPhrase3] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
@@ -146,11 +147,11 @@ export default function GamePage() {
   };
 
   const handleSubmission = async () => {
-    if (!phrase1.trim() || !phrase2.trim() || !currentPlayer) return;
+    if (!phrase1.trim() || !phrase2.trim() || !phrase3.trim() || !currentPlayer) return;
     setIsSubmitting(true);
     
     try {
-      const originalPhrases = [phrase1, phrase2];
+      const originalPhrases = [phrase1, phrase2, phrase3];
       const anonymized = await getAnonymizedPhrases(originalPhrases);
 
       const newPhrases: Phrase[] = anonymized.map((text, index) => ({
@@ -302,7 +303,7 @@ export default function GamePage() {
       <CardHeader>
         <CardTitle>Envía tus Frases</CardTitle>
         <CardDescription>
-          Escribe dos frases personales y únicas. Serán anonimizadas y el resto
+          Escribe tres frases personales y únicas. Serán anonimizadas y el resto
           de jugadores tendrán que adivinar cuáles son las tuyas.
         </CardDescription>
       </CardHeader>
@@ -319,7 +320,13 @@ export default function GamePage() {
             onChange={e => setPhrase2(e.target.value)}
             disabled={isSubmitting}
         />
-        <Button onClick={handleSubmission} className="w-full" disabled={!phrase1.trim() || !phrase2.trim() || isSubmitting}>
+        <Textarea 
+            placeholder="Tercera frase..." 
+            value={phrase3}
+            onChange={e => setPhrase3(e.target.value)}
+            disabled={isSubmitting}
+        />
+        <Button onClick={handleSubmission} className="w-full" disabled={!phrase1.trim() || !phrase2.trim() || !phrase3.trim() || isSubmitting}>
             {isSubmitting ? <Hourglass className="mr-2 animate-spin"/> : <Send className="mr-2"/>}
             {isSubmitting ? 'Enviando...' : 'Enviar Frases'}
         </Button>

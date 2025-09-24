@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useState, useEffect } from 'react';
@@ -36,38 +37,37 @@ export default function GamePage() {
     const gameRef = doc(db, 'games', gameId);
 
     const unsubscribe = onSnapshot(gameRef, (doc) => {
-      const gameData = doc.data() as Game;
-      setGame(gameData);
+      if (doc.exists()) {
+        const gameData = doc.data() as Game;
+        setGame(gameData);
 
-      const storedPlayerId = localStorage.getItem(`player-id-${gameId}`);
-      if (storedPlayerId && gameData) {
-        const player = gameData.players.find(p => p.id === storedPlayerId);
-        if (player) {
-          setCurrentPlayer(player);
-          setIsHost(gameData.hostId === player.id);
-        } else {
-            localStorage.removeItem(`player-id-${gameId}`);
-            setCurrentPlayer(null);
-            setIsHost(false);
+        const storedPlayerId = localStorage.getItem(`player-id-${gameId}`);
+        if (storedPlayerId && gameData) {
+          const player = gameData.players.find(p => p.id === storedPlayerId);
+          if (player) {
+            setCurrentPlayer(player);
+            setIsHost(gameData.hostId === player.id);
+          } else {
+              localStorage.removeItem(`player-id-${gameId}`);
+              setCurrentPlayer(null);
+              setIsHost(false);
+          }
         }
-      }
-      
-      // Check if all players have submitted to advance the phase
-      if (gameData?.phase === 'submission' && gameData.players.every(p => p.hasSubmitted)) {
-        updateDoc(gameRef, { phase: 'guessing' });
+        
+        if (gameData?.phase === 'submission' && gameData.players.every(p => p.hasSubmitted)) {
+          updateDoc(gameRef, { phase: 'guessing' });
+        }
+      } else {
+        // Game doesn't exist, create it
+        const newGame: Game = {
+          id: gameId,
+          phase: 'lobby',
+          players: [],
+        };
+        setDoc(gameRef, newGame);
+        setGame(newGame);
       }
     });
-
-    getDoc(gameRef).then(docSnap => {
-        if (!docSnap.exists()) {
-          const newGame: Game = {
-            id: gameId,
-            phase: 'lobby',
-            players: [],
-          };
-          setDoc(gameRef, newGame);
-        }
-      });
 
     return () => unsubscribe();
   }, [gameId]);
@@ -78,6 +78,7 @@ export default function GamePage() {
     const newPlayer: Player = {
       id: crypto.randomUUID(),
       name: playerName.trim(),
+      hasSubmitted: false,
     };
     
     try {
@@ -86,7 +87,15 @@ export default function GamePage() {
       await runTransaction(db, async (transaction) => {
         const gameDoc = await transaction.get(gameRef);
         if (!gameDoc.exists()) {
-          throw "La partida no existe.";
+          // This case should ideally not happen due to the useEffect logic, but as a fallback:
+           const newGame: Game = {
+            id: gameId,
+            phase: 'lobby',
+            players: [newPlayer],
+            hostId: newPlayer.id,
+          };
+          transaction.set(gameRef, newGame);
+          return;
         }
         
         const gameData = gameDoc.data() as Game;
@@ -211,7 +220,7 @@ export default function GamePage() {
             <Card className="w-full max-w-md">
                 <CardHeader>
                     <CardTitle>Unirse a la Partida</CardTitle>
-                    <CardDescription>Introduce tu nombre para entrar al lobby.</CardDescription>
+                    <CardDescription>Introduce tu nombre para entrar al lobby de la partida: <strong>{gameId}</strong></CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
                      <Input
@@ -238,7 +247,7 @@ export default function GamePage() {
             <CardTitle className="text-2xl flex items-center gap-2">
             <Users /> Lobby de la Partida
             </CardTitle>
-            <CardDescription>Esperando a que el anfitrión inicie el juego. ¡La partida comenzará pronto!</CardDescription>
+            <CardDescription>ID de la partida: <strong>{gameId}</strong>. ¡Comparte este ID para que otros se unan!</CardDescription>
         </CardHeader>
         <CardContent>
             <h3 className="font-semibold mb-4">Jugadores Conectados ({game.players.length}):</h3>

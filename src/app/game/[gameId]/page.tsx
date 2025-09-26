@@ -529,6 +529,7 @@ export default function GamePage() {
     }
 
     const sortedPlayers = [...game.players].sort((a, b) => playerScores[b.id] - playerScores[a.id]);
+    const maxScore = sortedPlayers.length > 0 ? playerScores[sortedPlayers[0].id] : 0;
 
     const getPlayerName = (playerId: string) => game.players.find(p => p.id === playerId)?.name || 'Desconocido';
 
@@ -545,16 +546,19 @@ export default function GamePage() {
                 <div>
                     <h3 className="text-lg font-semibold mb-4">Puntuaciones</h3>
                     <ul className="space-y-3">
-                        {sortedPlayers.map((player, index) => (
-                             <li key={player.id} className="flex items-center justify-between p-3 bg-primary/10 rounded-lg">
-                                <div className="flex items-center gap-3">
-                                    <span className={`font-bold text-lg w-6 text-center ${index === 0 ? 'text-amber-500' : 'text-muted-foreground'}`}>{index + 1}</span>
-                                    <span className="font-medium">{player.name}</span>
-                                    {index === 0 && <Star className="text-amber-500" size={20}/>}
-                                </div>
-                               <Badge variant={index === 0 ? "default" : "secondary"}>{playerScores[player.id]} Puntos</Badge>
-                           </li>
-                        ))}
+                        {sortedPlayers.map((player, index) => {
+                            const isWinner = playerScores[player.id] === maxScore && maxScore > 0;
+                            return (
+                                <li key={player.id} className="flex items-center justify-between p-3 bg-primary/10 rounded-lg">
+                                    <div className="flex items-center gap-3">
+                                        <span className={`font-bold text-lg w-6 text-center ${isWinner ? 'text-amber-500' : 'text-muted-foreground'}`}>{index + 1}</span>
+                                        <span className="font-medium">{player.name}</span>
+                                        {isWinner && <Star className="text-amber-500" size={20}/>}
+                                    </div>
+                                <Badge variant={isWinner ? "default" : "secondary"}>{playerScores[player.id]} Puntos</Badge>
+                               </li>
+                            )
+                        })}
                     </ul>
                 </div>
 

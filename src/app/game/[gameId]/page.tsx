@@ -2,7 +2,7 @@
 "use client";
 
 import { useState, useEffect, useMemo } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import { doc, getFirestore, onSnapshot, setDoc, getDoc, updateDoc, arrayUnion, runTransaction, FirestoreError } from 'firebase/firestore';
 import { app } from '@/lib/firebase';
 import type { Game, Player, Phrase, Guess } from '@/lib/types';
@@ -11,10 +11,10 @@ import { Header } from '@/components/header';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { Badge } from '@/components/ui/badge';
-import { Users, LogIn, Send, Hourglass, Gamepad2, CheckCircle, AlertTriangle, Lightbulb, Trophy, Star } from 'lucide-react';
+import { Users, LogIn, Send, Hourglass, Gamepad2, CheckCircle, AlertTriangle, Lightbulb, Trophy, Star, Home, PartyPopper } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { DbError } from '@/components/db-error';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -28,6 +28,7 @@ try {
 
 export default function GamePage() {
   const params = useParams();
+  const router = useRouter();
   const gameId = params.gameId as string;
   const { toast } = useToast();
 
@@ -311,6 +312,10 @@ export default function GamePage() {
     }
   };
 
+  const handleCreateNewGame = () => {
+    const newGameId = `partida-${crypto.randomUUID().split('-')[0]}`;
+    router.push(`/game/${newGameId}`);
+  };
 
   if (dbError) {
     return <DbError message={dbError} projectId="studio-7956312296-90b9d" />
@@ -600,6 +605,16 @@ export default function GamePage() {
                     </Accordion>
                 </div>
             </CardContent>
+            <CardFooter className="flex-col sm:flex-row justify-center gap-4 pt-6">
+                <Button onClick={handleCreateNewGame}>
+                    <PartyPopper className="mr-2" />
+                    Crear Nueva Partida
+                </Button>
+                <Button variant="outline" onClick={() => router.push('/')}>
+                    <Home className="mr-2" />
+                    Volver al Inicio
+                </Button>
+            </CardFooter>
         </Card>
     );
 };
@@ -617,7 +632,3 @@ export default function GamePage() {
      </div>
   );
 }
-
-    
-
-    

@@ -12,7 +12,9 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { Users, LogIn, Send, Hourglass, Gamepad2, CheckCircle, AlertTriangle, Lightbulb } from 'lucide-react';
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
+import { Badge } from '@/components/ui/badge';
+import { Users, LogIn, Send, Hourglass, Gamepad2, CheckCircle, AlertTriangle, Lightbulb, Trophy, Star } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { DbError } from '@/components/db-error';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -509,12 +511,94 @@ export default function GamePage() {
     return playerHasGuessed ? renderSubmissionStatus("guessing") : renderGuessingForm();
   }
 
-  const renderResults = () => (
-    <div className="text-center">
-        <h2 className="text-2xl font-bold">Fase de Resultados</h2>
-        <p>¡Próximamente!</p>
-    </div>
-  );
+  const renderResults = () => {
+    if (!game || !game.phrases || !game.guesses) {
+        return <p>Cargando resultados...</p>;
+    }
+
+    const playerScores: Record<string, number> = game.players.reduce((acc, player) => ({...acc, [player.id]: 0}), {});
+
+    for (const guessingPlayerId in game.guesses) {
+        const playerGuesses = game.guesses[guessingPlayerId];
+        for (const guess of playerGuesses) {
+            const phrase = game.phrases.find(p => p.id === guess.phraseId);
+            if (phrase && phrase.authorId === guess.guessedPlayerId) {
+                playerScores[guessingPlayerId]++;
+            }
+        }
+    }
+
+    const sortedPlayers = [...game.players].sort((a, b) => playerScores[b.id] - playerScores[a.id]);
+
+    const getPlayerName = (playerId: string) => game.players.find(p => p.id === playerId)?.name || 'Desconocido';
+
+    return (
+        <Card className="w-full max-w-4xl mx-auto">
+            <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-2xl">
+                    <Trophy className="text-amber-500"/>
+                    ¡Resultados Finales!
+                </CardTitle>
+                <CardDescription>Veamos quién conoce mejor a los demás.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-8">
+                <div>
+                    <h3 className="text-lg font-semibold mb-4">Puntuaciones</h3>
+                    <ul className="space-y-3">
+                        {sortedPlayers.map((player, index) => (
+                             <li key={player.id} className="flex items-center justify-between p-3 bg-primary/10 rounded-lg">
+                                <div className="flex items-center gap-3">
+                                    <span className={`font-bold text-lg w-6 text-center ${index === 0 ? 'text-amber-500' : 'text-muted-foreground'}`}>{index + 1}</span>
+                                    <span className="font-medium">{player.name}</span>
+                                    {index === 0 && <Star className="text-amber-500" size={20}/>}
+                                </div>
+                               <Badge variant={index === 0 ? "default" : "secondary"}>{playerScores[player.id]} Puntos</Badge>
+                           </li>
+                        ))}
+                    </ul>
+                </div>
+
+                <div>
+                    <h3 className="text-lg font-semibold mb-4">Resumen de Adivinanzas</h3>
+                    <Accordion type="single" collapsible className="w-full">
+                        {shuffledPhrases.map(phrase => (
+                             <AccordionItem key={phrase.id} value={phrase.id}>
+                                <AccordionTrigger>
+                                    <div className="text-left">
+                                        <p className="italic">"{phrase.anonymizedText}"</p>
+                                        <p className="text-sm text-muted-foreground mt-1">
+                                            Escrita por: <span className="font-semibold text-primary">{getPlayerName(phrase.authorId)}</span>
+                                        </p>
+                                    </div>
+                                </AccordionTrigger>
+                                <AccordionContent>
+                                    <ul className="space-y-2 pl-4">
+                                        {game.players.map(guessingPlayer => {
+                                            if (guessingPlayer.id === phrase.authorId) return null;
+                                            
+                                            const guess = game.guesses?.[guessingPlayer.id]?.find(g => g.phraseId === phrase.id);
+                                            const guessedPlayerName = guess ? getPlayerName(guess.guessedPlayerId) : "N/A";
+                                            const isCorrect = guess?.guessedPlayerId === phrase.authorId;
+
+                                            return (
+                                                <li key={guessingPlayer.id} className="text-sm">
+                                                    <strong>{guessingPlayer.name}</strong> ha adivinado: 
+                                                    <Badge variant={isCorrect ? "default" : "destructive"} className="ml-2">
+                                                        {guessedPlayerName}
+                                                    </Badge>
+                                                </li>
+                                            )
+                                        })}
+                                    </ul>
+                                </AccordionContent>
+                            </AccordionItem>
+                        ))}
+                    </Accordion>
+                </div>
+            </CardContent>
+        </Card>
+    );
+};
 
 
   return (
@@ -529,5 +613,7 @@ export default function GamePage() {
      </div>
   );
 }
+
+    
 
     

@@ -1,6 +1,6 @@
 // Import the functions you need from the SDKs you need
 import { initializeApp, getApp, getApps } from 'firebase/app';
-import { getFirestore } from 'firebase/firestore';
+import { getFirestore, initializeFirestore } from 'firebase/firestore';
 
 // Your web app's Firebase configuration
 const firebaseConfig = {
@@ -14,6 +14,12 @@ const firebaseConfig = {
 
 // Initialize Firebase
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
-const db = getFirestore(app);
+
+// The distinction between getFirestore and initializeFirestore is that
+// initializeFirestore won't throw an error if the database doesn't exist.
+// This allows us to gracefully handle the error in the UI.
+const db = initializeFirestore(app, {});
 
 export { app, db };
+
+    

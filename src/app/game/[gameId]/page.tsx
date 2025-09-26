@@ -3,7 +3,7 @@
 
 import { useState, useEffect } from 'react';
 import { useParams } from 'next/navigation';
-import { doc, getFirestore, onSnapshot, setDoc, getDoc, updateDoc, arrayUnion, runTransaction } from 'firebase/firestore';
+import { doc, getFirestore, onSnapshot, setDoc, getDoc, updateDoc, arrayUnion, runTransaction, FirestoreError } from 'firebase/firestore';
 import { app } from '@/lib/firebase';
 import type { Game, Player, Phrase } from '@/lib/types';
 import { getAnonymizedPhrases } from '@/app/actions';
@@ -12,10 +12,16 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { Users, LogIn, Send, Hourglass, Gamepad2, CheckCircle } from 'lucide-react';
+import { Users, LogIn, Send, Hourglass, Gamepad2, CheckCircle, AlertTriangle } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import { DbError } from '@/components/db-error';
 
-const db = getFirestore(app);
+let db: any;
+try {
+  db = getFirestore(app);
+} catch (e) {
+  console.error(e);
+}
 
 export default function GamePage() {
   const params = useParams();
@@ -30,9 +36,13 @@ export default function GamePage() {
   const [phrase2, setPhrase2] = useState('');
   const [phrase3, setPhrase3] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [dbError, setDbError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!gameId) return;
+    if (!gameId || !db) {
+        setDbError("Firestore is not initialized.");
+        return;
+    };
 
     const gameRef = doc(db, 'games', gameId);
 
@@ -64,16 +74,25 @@ export default function GamePage() {
           phase: 'lobby',
           players: [],
         };
-        setDoc(gameRef, newGame);
+        setDoc(gameRef, newGame).catch(handleFirestoreError);
         setGame(newGame);
       }
+    }, (error) => {
+        handleFirestoreError(error);
     });
 
     return () => unsubscribe();
   }, [gameId]);
+
+  const handleFirestoreError = (error: any) => {
+    console.error("Firestore Error:", error);
+    if (error instanceof FirestoreError && (error.code === 'failed-precondition' || error.code === 'unimplemented')) {
+        setDbError("La base de datos de Firestore no está activada. Por favor, actívala en la consola de Firebase para continuar.");
+    }
+  }
   
   const handleJoinGame = async () => {
-    if (!playerName.trim() || !gameId) return;
+    if (!playerName.trim() || !gameId || dbError) return;
     
     const newPlayer: Player = {
       id: crypto.randomUUID(),
@@ -87,7 +106,6 @@ export default function GamePage() {
       await runTransaction(db, async (transaction) => {
         const gameDoc = await transaction.get(gameRef);
         if (!gameDoc.exists()) {
-          // This case should ideally not happen due to the useEffect logic, but as a fallback:
            const newGame: Game = {
             id: gameId,
             phase: 'lobby',
@@ -124,17 +142,20 @@ export default function GamePage() {
       });
 
     } catch (error: any) {
-      console.error("Error al unirse a la partida:", error);
-      toast({
-        title: "Error",
-        description: error.message || "No se pudo unir a la partida. Inténtalo de nuevo.",
-        variant: "destructive",
-      });
+      handleFirestoreError(error);
+      if (!(error instanceof FirestoreError)) {
+        console.error("Error al unirse a la partida:", error);
+        toast({
+            title: "Error",
+            description: error.message || "No se pudo unir a la partida. Inténtalo de nuevo.",
+            variant: "destructive",
+        });
+      }
     }
   };
 
   const handleStartGame = async () => {
-    if (!isHost) return;
+    if (!isHost || dbError) return;
 
     try {
         const gameRef = doc(db, 'games', gameId);
@@ -146,6 +167,7 @@ export default function GamePage() {
             description: "Es hora de enviar vuestras frases.",
         });
     } catch (error) {
+        handleFirestoreError(error);
         console.error("Error al iniciar la partida:", error);
         toast({
             title: "Error",
@@ -156,7 +178,7 @@ export default function GamePage() {
   };
 
   const handleSubmission = async () => {
-    if (!phrase1.trim() || !phrase2.trim() || !phrase3.trim() || !currentPlayer) return;
+    if (!phrase1.trim() || !phrase2.trim() || !phrase3.trim() || !currentPlayer || dbError) return;
     setIsSubmitting(true);
     
     try {
@@ -191,17 +213,23 @@ export default function GamePage() {
       });
 
     } catch (error: any) {
-        console.error("Error submitting phrases:", error);
-        toast({
-            title: "Error",
-            description: error.message || "No se pudieron enviar tus frases.",
-            variant: "destructive"
-        });
+        handleFirestoreError(error);
+        if (!(error instanceof FirestoreError)){
+            console.error("Error submitting phrases:", error);
+            toast({
+                title: "Error",
+                description: error.message || "No se pudieron enviar tus frases.",
+                variant: "destructive"
+            });
+        }
     } finally {
         setIsSubmitting(false);
     }
   };
 
+  if (dbError) {
+    return <DbError message={dbError} projectId="studio-7956312296-90b9d" />
+  }
 
   if (!game) {
     return (
@@ -229,8 +257,9 @@ export default function GamePage() {
                         value={playerName}
                         onChange={(e) => setPlayerName(e.target.value)}
                         onKeyDown={(e) => e.key === 'Enter' && handleJoinGame()}
+                        disabled={!!dbError}
                     />
-                    <Button onClick={handleJoinGame} className="w-full">
+                    <Button onClick={handleJoinGame} className="w-full" disabled={!!dbError}>
                         <LogIn className="mr-2"/>
                         Unirse al Lobby
                     </Button>
@@ -368,3 +397,5 @@ export default function GamePage() {
      </div>
   );
 }
+
+    

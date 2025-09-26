@@ -1,20 +1,21 @@
 
 "use client";
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useParams } from 'next/navigation';
 import { doc, getFirestore, onSnapshot, setDoc, getDoc, updateDoc, arrayUnion, runTransaction, FirestoreError } from 'firebase/firestore';
 import { app } from '@/lib/firebase';
-import type { Game, Player, Phrase } from '@/lib/types';
+import type { Game, Player, Phrase, Guess } from '@/lib/types';
 import { getAnonymizedPhrases } from '@/app/actions';
 import { Header } from '@/components/header';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { Users, LogIn, Send, Hourglass, Gamepad2, CheckCircle, AlertTriangle } from 'lucide-react';
+import { Users, LogIn, Send, Hourglass, Gamepad2, CheckCircle, AlertTriangle, Lightbulb } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { DbError } from '@/components/db-error';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 let db: any;
 try {
@@ -37,6 +38,7 @@ export default function GamePage() {
   const [phrase3, setPhrase3] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [dbError, setDbError] = useState<string | null>(null);
+  const [guesses, setGuesses] = useState<Record<string, string>>({});
 
   useEffect(() => {
     if (!gameId || !db) {
@@ -65,8 +67,15 @@ export default function GamePage() {
         }
         
         if (gameData?.phase === 'submission' && gameData.players.every(p => p.hasSubmitted)) {
-          updateDoc(gameRef, { phase: 'guessing' });
+            const allPhrases = gameData.players.length * 3;
+            if (gameData.phrases?.length === allPhrases) {
+                updateDoc(gameRef, { phase: 'guessing' });
+            }
         }
+        if (gameData?.phase === 'guessing' && gameData.players.every(p => p.hasGuessed)) {
+          updateDoc(gameRef, { phase: 'results' });
+        }
+
       } else {
         // Game doesn't exist, create it
         const newGame: Game = {
@@ -83,6 +92,23 @@ export default function GamePage() {
 
     return () => unsubscribe();
   }, [gameId]);
+
+  const shuffledPhrases = useMemo(() => {
+    if (game?.phrases) {
+        // Create a seeded random function based on gameId for consistent shuffle
+        let seed = 0;
+        for (let i = 0; i < gameId.length; i++) {
+            seed += gameId.charCodeAt(i);
+        }
+        const random = () => {
+            const x = Math.sin(seed++) * 10000;
+            return x - Math.floor(x);
+        };
+        return [...game.phrases].sort(() => random() - 0.5);
+    }
+    return [];
+  }, [game?.phrases, gameId]);
+
 
   const handleFirestoreError = (error: any) => {
     console.error("Firestore Error:", error);
@@ -227,6 +253,58 @@ export default function GamePage() {
     }
   };
 
+  const handleGuessChange = (phraseId: string, guessedPlayerId: string) => {
+    setGuesses(prev => ({...prev, [phraseId]: guessedPlayerId}));
+  }
+
+  const handleGuessingSubmission = async () => {
+    if (!currentPlayer || !game || Object.keys(guesses).length !== game.phrases?.length) {
+        toast({ title: "Error", description: "Debes adivinar el autor de cada frase.", variant: "destructive"});
+        return;
+    }
+    setIsSubmitting(true);
+
+    const playerGuesses: Guess[] = Object.entries(guesses).map(([phraseId, guessedPlayerId]) => ({
+        phraseId,
+        guessedPlayerId,
+    }));
+    
+    try {
+        const gameRef = doc(db, 'games', gameId);
+        await runTransaction(db, async (transaction) => {
+            const gameDoc = await transaction.get(gameRef);
+            if (!gameDoc.exists()) throw new Error("Game not found");
+            
+            const currentGuesses = gameDoc.data().guesses || {};
+            const updatedPlayers = gameDoc.data().players.map((p: Player) => 
+                p.id === currentPlayer.id ? { ...p, hasGuessed: true } : p
+            );
+    
+            transaction.update(gameRef, {
+                [`guesses.${currentPlayer.id}`]: playerGuesses,
+                players: updatedPlayers
+            });
+          });
+
+        toast({
+            title: "¡Adivinanzas enviadas!",
+            description: "Esperando a que el resto de jugadores terminen...",
+          });
+
+    } catch (error) {
+        handleFirestoreError(error);
+        console.error("Error submitting guesses:", error);
+        toast({
+            title: "Error",
+            description: "No se pudieron enviar tus adivinanzas.",
+            variant: "destructive"
+        });
+    } finally {
+        setIsSubmitting(false);
+    }
+  };
+
+
   if (dbError) {
     return <DbError message={dbError} projectId="studio-7956312296-90b9d" />
   }
@@ -308,32 +386,32 @@ export default function GamePage() {
     </Card>
   );
   
-  const renderSubmissionStatus = () => (
-     <Card className="w-full max-w-2xl mx-auto">
-        <CardHeader>
-             <CardTitle>Esperando al resto</CardTitle>
-             <CardDescription>La siguiente fase comenzará cuando todos hayan enviado sus frases.</CardDescription>
-        </CardHeader>
-        <CardContent>
-             <ul className="space-y-3">
-                 {game.players.map(p => (
-                     <li key={p.id} className="flex items-center justify-between p-3 bg-primary/10 rounded-lg">
-                         <span className="font-medium">{p.name}</span>
-                         {p.hasSubmitted ? (
-                             <span className="flex items-center gap-2 text-green-600">
-                                 <CheckCircle /> ¡Listo!
-                             </span>
-                         ) : (
-                            <span className="flex items-center gap-2 text-muted-foreground">
-                                <Hourglass className="animate-spin" /> Escribiendo...
+  const renderSubmissionStatus = (phase: "submission" | "guessing") => (
+    <Card className="w-full max-w-2xl mx-auto">
+       <CardHeader>
+            <CardTitle>Esperando al resto</CardTitle>
+            <CardDescription>La siguiente fase comenzará cuando todos hayan terminado.</CardDescription>
+       </CardHeader>
+       <CardContent>
+            <ul className="space-y-3">
+                {game.players.map(p => (
+                    <li key={p.id} className="flex items-center justify-between p-3 bg-primary/10 rounded-lg">
+                        <span className="font-medium">{p.name}</span>
+                        {(phase === 'submission' ? p.hasSubmitted : p.hasGuessed) ? (
+                            <span className="flex items-center gap-2 text-green-600">
+                                <CheckCircle /> ¡Listo!
                             </span>
-                         )}
-                     </li>
-                 ))}
-             </ul>
-        </CardContent>
-     </Card>
-  );
+                        ) : (
+                           <span className="flex items-center gap-2 text-muted-foreground">
+                               <Hourglass className="animate-spin" /> {phase === 'submission' ? 'Escribiendo...' : 'Adivinando...'}
+                           </span>
+                        )}
+                    </li>
+                ))}
+            </ul>
+       </CardContent>
+    </Card>
+ );
 
 
   const renderSubmissionForm = () => (
@@ -374,15 +452,61 @@ export default function GamePage() {
   
   const renderSubmission = () => {
     const playerHasSubmitted = game.players.find(p => p.id === currentPlayer.id)?.hasSubmitted;
-    return playerHasSubmitted ? renderSubmissionStatus() : renderSubmissionForm();
+    return playerHasSubmitted ? renderSubmissionStatus("submission") : renderSubmissionForm();
   }
   
-  const renderGuessing = () => (
+  const renderGuessingForm = () => {
+    const otherPlayers = game.players.filter(p => p.id !== currentPlayer.id);
+    const allPhrasesGuessed = shuffledPhrases.length > 0 && shuffledPhrases.every(phrase => guesses[phrase.id]);
+
+    return (
+        <Card className="w-full max-w-4xl mx-auto">
+            <CardHeader>
+                <CardTitle>¿Quién escribió qué?</CardTitle>
+                <CardDescription>Adivina qué jugador escribió cada una de las siguientes frases.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+                {shuffledPhrases.map((phrase) => (
+                    <div key={phrase.id} className="grid grid-cols-1 md:grid-cols-2 gap-4 items-center p-4 border rounded-lg">
+                        <p className="italic text-lg">"{phrase.anonymizedText}"</p>
+                        <Select
+                           value={guesses[phrase.id] || ""}
+                           onValueChange={(value) => handleGuessChange(phrase.id, value)}
+                           disabled={isSubmitting}
+                        >
+                            <SelectTrigger>
+                                <SelectValue placeholder="Selecciona un jugador..." />
+                            </SelectTrigger>
+                            <SelectContent>
+                                {otherPlayers.map(player => (
+                                    <SelectItem key={player.id} value={player.id}>
+                                        {player.name}
+                                    </SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                    </div>
+                ))}
+                 <Button onClick={handleGuessingSubmission} className="w-full" disabled={!allPhrasesGuessed || isSubmitting}>
+                    {isSubmitting ? <Hourglass className="mr-2 animate-spin"/> : <Lightbulb className="mr-2"/>}
+                    {isSubmitting ? 'Enviando Adivinanzas...' : 'Enviar Adivinanzas'}
+                </Button>
+            </CardContent>
+        </Card>
+    );
+  };
+  
+  const renderGuessing = () => {
+    const playerHasGuessed = game.players.find(p => p.id === currentPlayer.id)?.hasGuessed;
+    return playerHasGuessed ? renderSubmissionStatus("guessing") : renderGuessingForm();
+  }
+
+  const renderResults = () => (
     <div className="text-center">
-        <h2 className="text-2xl font-bold">Fase de Adivinanzas</h2>
+        <h2 className="text-2xl font-bold">Fase de Resultados</h2>
         <p>¡Próximamente!</p>
     </div>
-    );
+  );
 
 
   return (
@@ -392,10 +516,8 @@ export default function GamePage() {
         {game.phase === 'lobby' && renderLobby()}
         {game.phase === 'submission' && renderSubmission()}
         {game.phase === 'guessing' && renderGuessing()}
-        {/* Other game phases will be rendered here */}
+        {game.phase === 'results' && renderResults()}
        </main>
      </div>
   );
 }
-
-    

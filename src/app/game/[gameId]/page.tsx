@@ -349,7 +349,7 @@ export default function GamePage() {
                         onKeyDown={(e) => e.key === 'Enter' && handleJoinGame()}
                         disabled={!!dbError}
                     />
-                    <Button onClick={handleJoinGame} className="w-full" disabled={!!dbError}>
+                    <Button onClick={handleJoinGame} className="w-full" disabled={!playerName.trim() || !!dbError}>
                         <LogIn className="mr-2"/>
                         Unirse al Lobby
                     </Button>

@@ -258,10 +258,15 @@ export default function GamePage() {
   }
 
   const handleGuessingSubmission = async () => {
-    if (!currentPlayer || !game || Object.keys(guesses).length !== game.phrases?.length) {
+    if (!currentPlayer || !game ) {
+        return;
+    }
+    const phrasesToGuess = shuffledPhrases.filter(p => p.authorId !== currentPlayer.id);
+    if (Object.keys(guesses).length !== phrasesToGuess.length) {
         toast({ title: "Error", description: "Debes adivinar el autor de cada frase.", variant: "destructive"});
         return;
     }
+
     setIsSubmitting(true);
 
     const playerGuesses: Guess[] = Object.entries(guesses).map(([phraseId, guessedPlayerId]) => ({
@@ -456,8 +461,11 @@ export default function GamePage() {
   }
   
   const renderGuessingForm = () => {
+    if (!game || !currentPlayer) return null;
+
     const otherPlayers = game.players.filter(p => p.id !== currentPlayer.id);
-    const allPhrasesGuessed = shuffledPhrases.length > 0 && shuffledPhrases.every(phrase => guesses[phrase.id]);
+    const phrasesToGuess = shuffledPhrases.filter(p => p.authorId !== currentPlayer.id);
+    const allPhrasesGuessed = phrasesToGuess.length > 0 && phrasesToGuess.every(phrase => guesses[phrase.id]);
 
     return (
         <Card className="w-full max-w-4xl mx-auto">
@@ -466,7 +474,7 @@ export default function GamePage() {
                 <CardDescription>Adivina qué jugador escribió cada una de las siguientes frases.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
-                {shuffledPhrases.map((phrase) => (
+                {phrasesToGuess.map((phrase) => (
                     <div key={phrase.id} className="grid grid-cols-1 md:grid-cols-2 gap-4 items-center p-4 border rounded-lg">
                         <p className="italic text-lg">"{phrase.anonymizedText}"</p>
                         <Select
@@ -521,3 +529,5 @@ export default function GamePage() {
      </div>
   );
 }
+
+    

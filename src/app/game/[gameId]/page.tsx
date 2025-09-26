@@ -3,7 +3,7 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { doc, getFirestore, onSnapshot, setDoc, getDoc, updateDoc, arrayUnion, runTransaction, FirestoreError } from 'firebase/firestore';
+import { doc, getFirestore, onSnapshot, setDoc, getDoc, updateDoc, arrayUnion, runTransaction, FirestoreError, deleteDoc } from 'firebase/firestore';
 import { app } from '@/lib/firebase';
 import type { Game, Player, Phrase, Guess } from '@/lib/types';
 import { getAnonymizedPhrases } from '@/app/actions';
@@ -14,7 +14,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { Badge } from '@/components/ui/badge';
-import { Users, LogIn, Send, Hourglass, Gamepad2, CheckCircle, AlertTriangle, Lightbulb, Trophy, Star, Home, PartyPopper } from 'lucide-react';
+import { Users, LogIn, Send, Hourglass, Gamepad2, CheckCircle, AlertTriangle, Lightbulb, Trophy, Star, Home, PartyPopper, XCircle } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { DbError } from '@/components/db-error';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -80,21 +80,28 @@ export default function GamePage() {
         }
 
       } else {
-        // Game doesn't exist, create it
-        const newGame: Game = {
-          id: gameId,
-          phase: 'lobby',
-          players: [],
-        };
-        setDoc(gameRef, newGame).catch(handleFirestoreError);
-        setGame(newGame);
+        if (game) { // If a game existed and now it doesn't, it was cancelled.
+            toast({
+                title: "Partida cancelada",
+                description: "La partida ha sido cancelada por el anfitrión.",
+            });
+            router.push('/');
+        } else { // Game doesn't exist, create it
+            const newGame: Game = {
+              id: gameId,
+              phase: 'lobby',
+              players: [],
+            };
+            setDoc(gameRef, newGame).catch(handleFirestoreError);
+            setGame(newGame);
+        }
       }
     }, (error) => {
         handleFirestoreError(error);
     });
 
     return () => unsubscribe();
-  }, [gameId]);
+  }, [gameId, game, router, toast]);
 
   const shuffledPhrases = useMemo(() => {
     if (game?.phrases) {
@@ -205,6 +212,24 @@ export default function GamePage() {
           });
     }
   };
+
+  const handleCancelGame = async () => {
+    if (!isHost || dbError) return;
+    try {
+        const gameRef = doc(db, 'games', gameId);
+        await deleteDoc(gameRef);
+        // The onSnapshot listener will handle the redirect for all players.
+    } catch (error) {
+        handleFirestoreError(error);
+        console.error("Error canceling game:", error);
+        toast({
+            title: "Error",
+            description: "No se pudo cancelar la partida.",
+            variant: "destructive",
+        });
+    }
+  };
+
 
   const handleSubmission = async () => {
     if (!phrase1.trim() || !phrase2.trim() || !phrase3.trim() || !currentPlayer || dbError) return;
@@ -380,21 +405,27 @@ export default function GamePage() {
                 </li>
             ))}
             </ul>
-            <div className="mt-8 text-center">
-                <p className="text-muted-foreground mb-4">¡Hola, <strong>{currentPlayer.name}</strong>!</p>
-                {isHost ? (
+        </CardContent>
+        <CardFooter className="flex-col sm:flex-row justify-center gap-4 pt-6">
+            <p className="text-muted-foreground text-center flex-1">¡Hola, <strong>{currentPlayer.name}</strong>!</p>
+            {isHost ? (
+                <div className="flex flex-col sm:flex-row gap-2">
                     <Button onClick={handleStartGame} size="lg" disabled={game.players.length < 2}>
                         <Gamepad2 className="mr-2" />
-                        Empezar Partida ({game.players.length} Jugadores)
+                        Empezar Partida ({game.players.length})
                     </Button>
-                ) : (
-                    <p>Espera a que el anfitrión inicie el juego.</p>
-                )}
-                 {isHost && game.players.length < 2 && (
-                    <p className="text-sm text-muted-foreground mt-2">Se necesitan al menos 2 jugadores para empezar.</p>
-                )}
-            </div>
-        </CardContent>
+                     <Button onClick={handleCancelGame} variant="destructive">
+                        <XCircle className="mr-2"/>
+                        Cancelar
+                    </Button>
+                </div>
+            ) : (
+                <p>Espera a que el anfitrión inicie el juego.</p>
+            )}
+             {isHost && game.players.length < 2 && (
+                <p className="text-sm text-muted-foreground mt-2 text-center w-full">Se necesitan al menos 2 jugadores para empezar.</p>
+            )}
+        </CardFooter>
     </Card>
   );
   
@@ -632,5 +663,7 @@ export default function GamePage() {
      </div>
   );
 }
+
+    
 
     

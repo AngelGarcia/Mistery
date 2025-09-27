@@ -4,17 +4,23 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Header } from '@/components/header';
-import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Separator } from '@/components/ui/separator';
 
 export default function Home() {
   const router = useRouter();
+  const [joinGameId, setJoinGameId] = useState('');
 
   const handleCreateGame = () => {
     const newGameId = `partida-${crypto.randomUUID().split('-')[0]}`;
     router.push(`/game/${newGameId}`);
+  };
+
+  const handleJoinGame = () => {
+    if (joinGameId.trim()) {
+      router.push(`/game/${joinGameId.trim()}`);
+    }
   };
   
   return (
@@ -42,11 +48,24 @@ export default function Home() {
                 <Separator className="flex-1" />
             </div>
 
-            <Link href={`/game/main-game`} className="w-full block">
-              <Button size="lg" variant="secondary" className="w-full">
-                Unirse a la Partida Principal
+            <div className="space-y-2">
+              <Input
+                type="text"
+                placeholder="ID de la partida existente"
+                value={joinGameId}
+                onChange={(e) => setJoinGameId(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleJoinGame()}
+              />
+              <Button 
+                size="lg" 
+                variant="secondary" 
+                className="w-full"
+                onClick={handleJoinGame}
+                disabled={!joinGameId.trim()}
+              >
+                Unirse a Partida
               </Button>
-            </Link>
+            </div>
           </div>
 
         </div>

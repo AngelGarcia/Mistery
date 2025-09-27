@@ -86,22 +86,17 @@ export default function GamePage() {
                 description: "La partida ha sido cancelada por el anfitrión.",
             });
             router.push('/');
-        } else { // Game doesn't exist, create it
-            const newGame: Game = {
-              id: gameId,
-              phase: 'lobby',
-              players: [],
-            };
-            setDoc(gameRef, newGame).catch(handleFirestoreError);
-            setGame(newGame);
         }
+        // Game does not exist, but we do not create it here anymore.
+        // It is created on join.
+        setGame(null); // Or some initial state that shows no game exists
       }
     }, (error) => {
         handleFirestoreError(error);
     });
 
     return () => unsubscribe();
-  }, [gameId, game, router, toast]);
+  }, [gameId, router, toast]);
 
   const shuffledPhrases = useMemo(() => {
     if (game?.phrases) {
@@ -149,6 +144,9 @@ export default function GamePage() {
             hostId: newPlayer.id,
           };
           transaction.set(gameRef, newGame);
+          // Special case for host: set player immediately
+          setCurrentPlayer(newPlayer); 
+          setIsHost(true);
           return;
         }
         
@@ -171,7 +169,12 @@ export default function GamePage() {
       });
       
       localStorage.setItem(`player-id-${gameId}`, newPlayer.id);
-      setCurrentPlayer(newPlayer);
+      // For non-hosts, the onSnapshot will update the currentPlayer state.
+      // For the host (in a new game), it's set inside the transaction.
+      if (!isHost) {
+        setCurrentPlayer(newPlayer);
+      }
+
       toast({
         title: "¡Bienvenido/a!",
         description: `Te has unido a la partida como ${newPlayer.name}.`,
@@ -346,16 +349,63 @@ export default function GamePage() {
     return <DbError message={dbError} projectId="studio-7956312296-90b9d" />
   }
 
-  if (!game) {
+  if (!game && !currentPlayer) {
+    // If there is no game data and no current player, we show the join screen.
+    // This is the initial state for anyone joining a game.
     return (
+       <div className="flex flex-col min-h-screen">
+        <Header />
+        <main className="flex-1 container mx-auto p-4 md:p-8 flex items-center justify-center">
+            <Card className="w-full max-w-md">
+                <CardHeader>
+                    <CardTitle>Unirse a la Partida</CardTitle>
+                    <CardDescription>Introduce tu nombre para entrar o crear la partida: <strong>{gameId}</strong></CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                     <Input
+                        type="text"
+                        placeholder="Tu nombre"
+                        value={playerName}
+                        onChange={(e) => setPlayerName(e.target.value)}
+                        onKeyDown={(e) => e.key === 'Enter' && handleJoinGame()}
+                        disabled={!!dbError}
+                    />
+                    <Button onClick={handleJoinGame} className="w-full" disabled={!playerName.trim() || !!dbError}>
+                        <LogIn className="mr-2"/>
+                        Unirse o Crear Partida
+                    </Button>
+                </CardContent>
+            </Card>
+        </main>
+       </div>
+    );
+  }
+  
+  if (!game && currentPlayer) {
+    // This state happens for the host of a new game right after creation,
+    // before the first onSnapshot fires.
+    return (
+        <div className="flex items-center justify-center min-h-screen">
+          <Hourglass className="animate-spin" /> 
+          <span className="ml-2">Creando partida...</span>
+        </div>
+    );
+  }
+
+  // From here on, we can assume 'game' is not null.
+  if (!game) {
+      // This should ideally not be reached if the logic above is correct.
+      // But as a fallback:
+       return (
         <div className="flex items-center justify-center min-h-screen">
           <Hourglass className="animate-spin" /> 
           <span className="ml-2">Cargando partida...</span>
         </div>
     );
   }
-  
+
   if (!currentPlayer) {
+    // User needs to join, but the game exists.
     return (
        <div className="flex flex-col min-h-screen">
         <Header />
@@ -663,7 +713,3 @@ export default function GamePage() {
      </div>
   );
 }
-
-    
-
-    

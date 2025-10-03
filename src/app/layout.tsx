@@ -3,8 +3,8 @@ import './globals.css';
 import { Toaster } from "@/components/ui/toaster";
 
 export const metadata: Metadata = {
-  title: 'Juego de Misterio',
-  description: 'Un juego de "¿quién es quién?" con frases misteriosas.',
+  title: '¿Quién es Quién?',
+  description: 'Un juego de misterio para adivinar quién escribió cada frase.',
 };
 
 export default function RootLayout({

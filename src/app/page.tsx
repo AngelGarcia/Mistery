@@ -29,11 +29,11 @@ export default function Home() {
       <main className="flex-1 container mx-auto p-4 md:p-8 flex flex-col items-center justify-center text-center">
         <div className="max-w-md w-full space-y-8">
           <div>
-            <h2 className="text-3xl font-bold text-primary">
-              ¡Bienvenido al Juego de Misterio!
+            <h2 className="text-4xl font-bold text-primary tracking-wider">
+              ¿Quién es Quién?
             </h2>
-            <p className="text-muted-foreground">
-              Crea una partida e invita a tus amigos o únete a una existente.
+            <p className="text-muted-foreground mt-2">
+              Atrévete a entrar. Descubre los secretos de tus amigos.
             </p>
           </div>
 

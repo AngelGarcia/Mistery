@@ -36,9 +36,7 @@ export default function GamePage() {
   const [currentPlayer, setCurrentPlayer] = useState<Player | null>(null);
   const [playerName, setPlayerName] = useState('');
   const [isHost, setIsHost] = useState(false);
-  const [phrase1, setPhrase1] = useState('');
-  const [phrase2, setPhrase2] = useState('');
-  const [phrase3, setPhrase3] = useState('');
+  const [phrase, setPhrase] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [dbError, setDbError] = useState<string | null>(null);
   const [guesses, setGuesses] = useState<Record<string, string>>({});
@@ -70,8 +68,8 @@ export default function GamePage() {
         }
         
         if (gameData?.phase === 'submission' && gameData.players.every(p => p.hasSubmitted)) {
-            const allPhrases = gameData.players.length * 3;
-            if (gameData.phrases?.length === allPhrases) {
+            const allPhrasesCount = gameData.players.length;
+            if (gameData.phrases?.length === allPhrasesCount) {
                 updateDoc(gameRef, { phase: 'guessing' });
             }
         }
@@ -87,9 +85,7 @@ export default function GamePage() {
             });
             router.push('/');
         }
-        // Game does not exist, but we do not create it here anymore.
-        // It is created on join.
-        setGame(null); // Or some initial state that shows no game exists
+        setGame(null);
       }
     }, (error) => {
         handleFirestoreError(error);
@@ -100,7 +96,6 @@ export default function GamePage() {
 
   const shuffledPhrases = useMemo(() => {
     if (game?.phrases) {
-        // Create a seeded random function based on gameId for consistent shuffle
         let seed = 0;
         for (let i = 0; i < gameId.length; i++) {
             seed += gameId.charCodeAt(i);
@@ -117,7 +112,7 @@ export default function GamePage() {
 
   const handleFirestoreError = (error: any) => {
     console.error("Firestore Error:", error);
-    if (error instanceof FirestoreError && (error.code === 'failed-precondition' || error.code === 'unimplemented')) {
+    if (error instanceof FirestoreError && (error.code === 'failed-precondition' || error.code === 'unimplemented' || error.message.includes('does not exist'))) {
         setDbError("La base de datos de Firestore no está activada. Por favor, actívala en la consola de Firebase para continuar.");
     }
   }
@@ -221,7 +216,6 @@ export default function GamePage() {
     try {
         const gameRef = doc(db, 'games', gameId);
         await deleteDoc(gameRef);
-        // The onSnapshot listener will handle the redirect for all players.
     } catch (error) {
         handleFirestoreError(error);
         console.error("Error canceling game:", error);
@@ -235,11 +229,11 @@ export default function GamePage() {
 
 
   const handleSubmission = async () => {
-    if (!phrase1.trim() || !phrase2.trim() || !phrase3.trim() || !currentPlayer || dbError) return;
+    if (!phrase.trim() || !currentPlayer || dbError) return;
     setIsSubmitting(true);
     
     try {
-      const originalPhrases = [phrase1, phrase2, phrase3];
+      const originalPhrases = [phrase];
       const anonymized = await getAnonymizedPhrases(originalPhrases);
 
       const newPhrases: Phrase[] = anonymized.map((text, index) => ({
@@ -265,8 +259,8 @@ export default function GamePage() {
       });
 
       toast({
-        title: "¡Frases enviadas!",
-        description: "Tus frases han sido anonimizadas. Esperando al resto de jugadores...",
+        title: "¡Frase enviada!",
+        description: "Tu frase ha sido anonimizada. Esperando al resto de jugadores...",
       });
 
     } catch (error: any) {
@@ -275,7 +269,7 @@ export default function GamePage() {
             console.error("Error submitting phrases:", error);
             toast({
                 title: "Error",
-                description: error.message || "No se pudieron enviar tus frases.",
+                description: error.message || "No se pudo enviar tu frase.",
                 variant: "destructive"
             });
         }
@@ -350,8 +344,6 @@ export default function GamePage() {
   }
 
   if (!game && !currentPlayer) {
-    // If there is no game data and no current player, we show the join screen.
-    // This is the initial state for anyone joining a game.
     return (
        <div className="flex flex-col min-h-screen">
         <Header />
@@ -382,8 +374,6 @@ export default function GamePage() {
   }
   
   if (!game && currentPlayer) {
-    // This state happens for the host of a new game right after creation,
-    // before the first onSnapshot fires.
     return (
         <div className="flex items-center justify-center min-h-screen">
           <Hourglass className="animate-spin" /> 
@@ -392,10 +382,7 @@ export default function GamePage() {
     );
   }
 
-  // From here on, we can assume 'game' is not null.
   if (!game) {
-      // This should ideally not be reached if the logic above is correct.
-      // But as a fallback:
        return (
         <div className="flex items-center justify-center min-h-screen">
           <Hourglass className="animate-spin" /> 
@@ -405,7 +392,6 @@ export default function GamePage() {
   }
 
   if (!currentPlayer) {
-    // User needs to join, but the game exists.
     return (
        <div className="flex flex-col min-h-screen">
         <Header />
@@ -510,34 +496,22 @@ export default function GamePage() {
   const renderSubmissionForm = () => (
     <Card className="w-full max-w-2xl mx-auto">
       <CardHeader>
-        <CardTitle>Envía tus Frases</CardTitle>
+        <CardTitle>Envía tu Frase</CardTitle>
         <CardDescription>
-          Escribe tres frases personales y únicas. Serán anonimizadas y el resto
-          de jugadores tendrán que adivinar cuáles son las tuyas.
+          Escribe una frase personal y única. Será anonimizada y el resto
+          de jugadores tendrán que adivinar que es tuya.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         <Textarea 
-            placeholder="Primera frase..." 
-            value={phrase1}
-            onChange={e => setPhrase1(e.target.value)}
+            placeholder="Escribe tu frase aquí..." 
+            value={phrase}
+            onChange={e => setPhrase(e.target.value)}
             disabled={isSubmitting}
         />
-        <Textarea 
-            placeholder="Segunda frase..." 
-            value={phrase2}
-            onChange={e => setPhrase2(e.target.value)}
-            disabled={isSubmitting}
-        />
-        <Textarea 
-            placeholder="Tercera frase..." 
-            value={phrase3}
-            onChange={e => setPhrase3(e.target.value)}
-            disabled={isSubmitting}
-        />
-        <Button onClick={handleSubmission} className="w-full" disabled={!phrase1.trim() || !phrase2.trim() || !phrase3.trim() || isSubmitting}>
+        <Button onClick={handleSubmission} className="w-full" disabled={!phrase.trim() || isSubmitting}>
             {isSubmitting ? <Hourglass className="mr-2 animate-spin"/> : <Send className="mr-2"/>}
-            {isSubmitting ? 'Enviando...' : 'Enviar Frases'}
+            {isSubmitting ? 'Enviando...' : 'Enviar Frase'}
         </Button>
       </CardContent>
     </Card>
@@ -556,33 +530,39 @@ export default function GamePage() {
     const allPhrasesGuessed = phrasesToGuess.length > 0 && phrasesToGuess.every(phrase => guesses[phrase.id]);
 
     return (
-        <Card className="w-full max-w-4xl mx-auto">
+        <Card className="w-full max-w-5xl mx-auto">
             <CardHeader>
                 <CardTitle>¿Quién escribió qué?</CardTitle>
                 <CardDescription>Adivina qué jugador escribió cada una de las siguientes frases.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
-                {phrasesToGuess.map((phrase) => (
-                    <div key={phrase.id} className="grid grid-cols-1 md:grid-cols-2 gap-4 items-center p-4 border rounded-lg">
-                        <p className="italic text-lg">"{phrase.anonymizedText}"</p>
-                        <Select
-                           value={guesses[phrase.id] || ""}
-                           onValueChange={(value) => handleGuessChange(phrase.id, value)}
-                           disabled={isSubmitting}
-                        >
-                            <SelectTrigger>
-                                <SelectValue placeholder="Selecciona un jugador..." />
-                            </SelectTrigger>
-                            <SelectContent>
-                                {otherPlayers.map(player => (
-                                    <SelectItem key={player.id} value={player.id}>
-                                        {player.name}
-                                    </SelectItem>
-                                ))}
-                            </SelectContent>
-                        </Select>
-                    </div>
-                ))}
+                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {phrasesToGuess.map((phrase) => (
+                        <Card key={phrase.id} className="flex flex-col">
+                            <CardContent className="p-6 flex-grow">
+                                <p className="italic text-lg">"{phrase.anonymizedText}"</p>
+                            </CardContent>
+                            <CardFooter>
+                                <Select
+                                value={guesses[phrase.id] || ""}
+                                onValueChange={(value) => handleGuessChange(phrase.id, value)}
+                                disabled={isSubmitting}
+                                >
+                                    <SelectTrigger>
+                                        <SelectValue placeholder="Selecciona un jugador..." />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        {otherPlayers.map(player => (
+                                            <SelectItem key={player.id} value={player.id}>
+                                                {player.name}
+                                            </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            </CardFooter>
+                        </Card>
+                    ))}
+                </div>
                  <Button onClick={handleGuessingSubmission} className="w-full" disabled={!allPhrasesGuessed || isSubmitting}>
                     {isSubmitting ? <Hourglass className="mr-2 animate-spin"/> : <Lightbulb className="mr-2"/>}
                     {isSubmitting ? 'Enviando Adivinanzas...' : 'Enviar Adivinanzas'}

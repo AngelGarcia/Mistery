@@ -1,3 +1,4 @@
+
 export type Player = {
   id: string;
   name: string;
@@ -16,6 +17,8 @@ export type Guess = {
   guessedPlayerId: string;
 };
 
+export type GameMode = "who-is-who" | "two-truths-one-lie";
+
 export type GamePhase = "lobby" | "submission" | "guessing" | "results";
 
 export type Game = {
@@ -25,4 +28,5 @@ export type Game = {
   hostId?: string; // ID of the player who is the host
   phrases?: Phrase[];
   guesses?: Record<string, Guess[]>; // Player ID -> Guesses
+  gameMode: GameMode;
 };

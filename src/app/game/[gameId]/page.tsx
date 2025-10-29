@@ -1,11 +1,11 @@
 
 "use client";
 
-import { useState, useEffect, useMemo } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useState, useEffect, useMemo, Suspense } from 'react';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { doc, getFirestore, onSnapshot, setDoc, getDoc, updateDoc, arrayUnion, runTransaction, FirestoreError, deleteDoc } from 'firebase/firestore';
 import { app } from '@/lib/firebase';
-import type { Game, Player, Phrase, Guess } from '@/lib/types';
+import type { Game, Player, Phrase, Guess, GameMode } from '@/lib/types';
 import { getAnonymizedPhrases } from '@/app/actions';
 import { Header } from '@/components/header';
 import { Button } from '@/components/ui/button';
@@ -26,10 +26,12 @@ try {
   console.error(e);
 }
 
-export default function GamePage() {
+function GamePageContent() {
   const params = useParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const gameId = params.gameId as string;
+  const gameModeFromURL = searchParams.get('gameMode') as GameMode | null;
   const { toast } = useToast();
 
   const [game, setGame] = useState<Game | null>(null);
@@ -67,14 +69,16 @@ export default function GamePage() {
           }
         }
         
-        if (gameData?.phase === 'submission' && gameData.players.every(p => p.hasSubmitted)) {
-            const allPhrasesCount = gameData.players.length;
-            if (gameData.phrases?.length === allPhrasesCount) {
-                updateDoc(gameRef, { phase: 'guessing' });
+        if (gameData.gameMode === 'who-is-who') {
+            if (gameData?.phase === 'submission' && gameData.players.every(p => p.hasSubmitted)) {
+                const allPhrasesCount = gameData.players.length;
+                if (gameData.phrases?.length === allPhrasesCount) {
+                    updateDoc(gameRef, { phase: 'guessing' });
+                }
             }
-        }
-        if (gameData?.phase === 'guessing' && gameData.players.every(p => p.hasGuessed)) {
-          updateDoc(gameRef, { phase: 'results' });
+            if (gameData?.phase === 'guessing' && gameData.players.every(p => p.hasGuessed)) {
+              updateDoc(gameRef, { phase: 'results' });
+            }
         }
 
       } else {
@@ -124,68 +128,71 @@ export default function GamePage() {
       id: crypto.randomUUID(),
       name: playerName.trim(),
       hasSubmitted: false,
+      hasGuessed: false,
     };
     
     try {
-      const gameRef = doc(db, 'games', gameId);
-      
-      await runTransaction(db, async (transaction) => {
-        const gameDoc = await transaction.get(gameRef);
-        if (!gameDoc.exists()) {
-           const newGame: Game = {
-            id: gameId,
-            phase: 'lobby',
-            players: [newPlayer],
-            hostId: newPlayer.id,
-          };
-          transaction.set(gameRef, newGame);
-          // Special case for host: set player immediately
-          setCurrentPlayer(newPlayer); 
-          setIsHost(true);
-          return;
-        }
+        const gameRef = doc(db, 'games', gameId);
         
-        const gameData = gameDoc.data() as Game;
-        const players = gameData.players || [];
+        await runTransaction(db, async (transaction) => {
+            const gameDoc = await transaction.get(gameRef);
+            if (!gameDoc.exists()) {
+                if (!gameModeFromURL) {
+                    toast({
+                        title: "Error",
+                        description: "No se ha especificado un modo de juego para esta nueva partida.",
+                        variant: "destructive",
+                    });
+                    throw new Error("Game mode not specified");
+                }
+               const newGame: Game = {
+                id: gameId,
+                phase: 'lobby',
+                players: [newPlayer],
+                hostId: newPlayer.id,
+                gameMode: gameModeFromURL,
+              };
+              transaction.set(gameRef, newGame);
+              setIsHost(true);
+            } else {
+                const gameData = gameDoc.data() as Game;
+                const players = gameData.players || [];
+                
+                if (players.some((p: Player) => p.name === newPlayer.name)) {
+                    throw new Error(`El nombre "${newPlayer.name}" ya está en uso.`);
+                }
         
-        if (players.some((p: Player) => p.name === newPlayer.name)) {
-            throw new Error(`El nombre "${newPlayer.name}" ya está en uso.`);
-        }
-
-        const updateData: Partial<Game> = {
-            players: [...players, newPlayer]
-        };
-
-        if (!gameData.hostId) {
-            updateData.hostId = newPlayer.id;
-        }
-
-        transaction.update(gameRef, updateData);
-      });
-      
-      localStorage.setItem(`player-id-${gameId}`, newPlayer.id);
-      // For non-hosts, the onSnapshot will update the currentPlayer state.
-      // For the host (in a new game), it's set inside the transaction.
-      if (!isHost) {
-        setCurrentPlayer(newPlayer);
-      }
-
-      toast({
-        title: "¡Bienvenido/a!",
-        description: `Te has unido a la partida como ${newPlayer.name}.`,
-      });
-
-    } catch (error: any) {
-      handleFirestoreError(error);
-      if (!(error instanceof FirestoreError)) {
-        console.error("Error al unirse a la partida:", error);
-        toast({
-            title: "Error",
-            description: error.message || "No se pudo unir a la partida. Inténtalo de nuevo.",
-            variant: "destructive",
+                const updateData: Partial<Game> = {
+                    players: [...players, newPlayer]
+                };
+        
+                if (!gameData.hostId) {
+                    updateData.hostId = newPlayer.id;
+                }
+        
+                transaction.update(gameRef, updateData);
+            }
         });
+        
+        localStorage.setItem(`player-id-${gameId}`, newPlayer.id);
+        setCurrentPlayer(newPlayer);
+  
+        toast({
+          title: "¡Bienvenido/a!",
+          description: `Te has unido a la partida como ${newPlayer.name}.`,
+        });
+  
+      } catch (error: any) {
+        handleFirestoreError(error);
+        if (!(error instanceof FirestoreError)) {
+          console.error("Error al unirse a la partida:", error);
+          toast({
+              title: "Error",
+              description: error.message || "No se pudo unir a la partida. Inténtalo de nuevo.",
+              variant: "destructive",
+          });
+        }
       }
-    }
   };
 
   const handleStartGame = async () => {
@@ -198,7 +205,7 @@ export default function GamePage() {
         });
         toast({
             title: "¡La partida ha comenzado!",
-            description: "Es hora de enviar vuestras frases.",
+            description: "Es hora de que cada uno envíe sus frases.",
         });
     } catch (error) {
         handleFirestoreError(error);
@@ -236,11 +243,11 @@ export default function GamePage() {
       const originalPhrases = [phrase];
       const anonymized = await getAnonymizedPhrases(originalPhrases);
 
-      const newPhrases: Phrase[] = anonymized.map((text, index) => ({
-        id: `${currentPlayer.id}-${index}`,
-        anonymizedText: text,
+      const newPhrase: Phrase = {
+        id: `${currentPlayer.id}-${Date.now()}`,
+        anonymizedText: anonymized[0],
         authorId: currentPlayer.id,
-      }));
+      };
 
       const gameRef = doc(db, 'games', gameId);
       await runTransaction(db, async (transaction) => {
@@ -253,7 +260,7 @@ export default function GamePage() {
         );
 
         transaction.update(gameRef, {
-            phrases: [...currentPhrases, ...newPhrases],
+            phrases: [...currentPhrases, newPhrase],
             players: updatedPlayers
         });
       });
@@ -335,8 +342,7 @@ export default function GamePage() {
   };
 
   const handleCreateNewGame = () => {
-    const newGameId = `partida-${crypto.randomUUID().split('-')[0]}`;
-    router.push(`/game/${newGameId}`);
+    router.push(`/`);
   };
 
   if (dbError) {
@@ -428,6 +434,7 @@ export default function GamePage() {
             <Users /> Lobby de la Partida
             </CardTitle>
             <CardDescription>ID de la partida: <strong>{gameId}</strong>. ¡Comparte este ID para que otros se unan!</CardDescription>
+             <p className="text-sm text-primary font-semibold pt-2">Modo de juego: {game.gameMode === 'who-is-who' ? '¿Quién es Quién?' : '2 Verdades, 1 Mentira'}</p>
         </CardHeader>
         <CardContent>
             <h3 className="font-semibold mb-4">Jugadores Conectados ({game.players.length}):</h3>
@@ -680,16 +687,42 @@ export default function GamePage() {
     );
 };
 
+const renderWhoIsWhoGame = () => {
+    switch(game.phase) {
+        case 'lobby': return renderLobby();
+        case 'submission': return renderSubmission();
+        case 'guessing': return renderGuessing();
+        case 'results': return renderResults();
+        default: return <p>Fase del juego desconocida</p>
+    }
+}
+
 
   return (
      <div className="flex flex-col min-h-screen">
       <Header />
        <main className="flex-1 container mx-auto p-4 md:p-8">
-        {game.phase === 'lobby' && renderLobby()}
-        {game.phase === 'submission' && renderSubmission()}
-        {game.phase === 'guessing' && renderGuessing()}
-        {game.phase === 'results' && renderResults()}
+        {game.gameMode === 'who-is-who' && renderWhoIsWhoGame()}
+        {game.gameMode === 'two-truths-one-lie' && (
+            // Placeholder for the new game mode
+             <Card>
+                <CardHeader>
+                    <CardTitle>Dos Verdades y una Mentira</CardTitle>
+                </CardHeader>
+                <CardContent>
+                    <p>Este modo de juego está en construcción.</p>
+                </CardContent>
+             </Card>
+        )}
        </main>
      </div>
   );
+}
+
+export default function GamePage() {
+    return (
+        <Suspense fallback={<div>Cargando...</div>}>
+            <GamePageContent />
+        </Suspense>
+    )
 }

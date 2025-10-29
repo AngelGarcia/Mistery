@@ -16,9 +16,7 @@ import { Badge } from '@/components/ui/badge';
 import { Users, LogIn, Send, Hourglass, Gamepad2, CheckCircle, Lightbulb, Trophy, Star, Home, PartyPopper, XCircle } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { useFirestore } from '@/firebase';
-import { errorEmitter } from '@/firebase/error-emitter';
-import { FirestorePermissionError } from '@/firebase/errors';
+import { db } from '@/lib/firebase';
 
 function GamePageContent() {
   const params = useParams();
@@ -27,7 +25,6 @@ function GamePageContent() {
   const gameId = params.gameId as string;
   const gameModeFromURL = searchParams.get('gameMode') as GameMode | null;
   const { toast } = useToast();
-  const db = useFirestore();
 
   const [game, setGame] = useState<Game | null>(null);
   const [currentPlayer, setCurrentPlayer] = useState<Player | null>(null);
@@ -38,12 +35,11 @@ function GamePageContent() {
   const [guesses, setGuesses] = useState<Record<string, string>>({});
 
   useEffect(() => {
-    if (!gameId || !db) return;
+    if (!gameId) return;
 
     const gameRef = doc(db, 'games', gameId);
 
-    const unsubscribe = onSnapshot(gameRef, 
-      (doc) => {
+    const unsubscribe = onSnapshot(gameRef, (doc) => {
         if (doc.exists()) {
           const gameData = doc.data() as Game;
           setGame(gameData);
@@ -51,10 +47,11 @@ function GamePageContent() {
           const storedPlayerId = localStorage.getItem(`player-id-${gameId}`);
           if (storedPlayerId) {
             const player = gameData.players.find(p => p.id === storedPlayerId);
-            if (player) {
+             if (player) {
               setCurrentPlayer(player);
               setIsHost(gameData.hostId === player.id);
             } else {
+              // The stored player ID is not in the current game state, so remove it.
               localStorage.removeItem(`player-id-${gameId}`);
               setCurrentPlayer(null);
               setIsHost(false);
@@ -65,23 +62,11 @@ function GamePageContent() {
               if (gameData?.phase === 'submission' && gameData.players.every(p => p.hasSubmitted)) {
                   const allPhrasesCount = gameData.players.length;
                   if (gameData.phrases?.length === allPhrasesCount) {
-                      updateDoc(gameRef, { phase: 'guessing' }).catch(async (serverError) => {
-                        errorEmitter.emit('permission-error', new FirestorePermissionError({
-                            path: gameRef.path,
-                            operation: 'update',
-                            requestResourceData: { phase: 'guessing' },
-                          }));
-                      });
+                      updateDoc(gameRef, { phase: 'guessing' });
                   }
               }
               if (gameData?.phase === 'guessing' && gameData.players.every(p => p.hasGuessed)) {
-                updateDoc(gameRef, { phase: 'results' }).catch(async (serverError) => {
-                    errorEmitter.emit('permission-error', new FirestorePermissionError({
-                        path: gameRef.path,
-                        operation: 'update',
-                        requestResourceData: { phase: 'results' },
-                      }));
-                });
+                updateDoc(gameRef, { phase: 'results' });
               }
           }
         } else {
@@ -94,17 +79,10 @@ function GamePageContent() {
             }
             setGame(null);
         }
-      }, 
-      async (error) => {
-        errorEmitter.emit('permission-error', new FirestorePermissionError({
-            path: gameRef.path,
-            operation: 'list',
-          }));
-      }
-    );
+    });
 
     return () => unsubscribe();
-  }, [gameId, db, router, toast, game]);
+  }, [gameId, router, toast, game]);
 
   const shuffledPhrases = useMemo(() => {
     if (game?.phrases) {
@@ -122,20 +100,22 @@ function GamePageContent() {
   }, [game?.phrases, gameId]);
 
   const handleJoinGame = async () => {
-    if (!playerName.trim() || !gameId || !db) return;
-
-    const newPlayer: Player = {
-        id: crypto.randomUUID(),
-        name: playerName.trim(),
-        hasSubmitted: false,
-        hasGuessed: false,
-    };
+    if (!playerName.trim() || !gameId) return;
 
     const gameRef = doc(db, 'games', gameId);
-
+    let newPlayer: Player | null = null;
+    
     try {
         await runTransaction(db, async (transaction) => {
             const gameDoc = await transaction.get(gameRef);
+            
+            newPlayer = {
+                id: crypto.randomUUID(),
+                name: playerName.trim(),
+                hasSubmitted: false,
+                hasGuessed: false,
+            };
+
             if (!gameDoc.exists()) {
                 if (!gameModeFromURL) {
                     toast({
@@ -153,13 +133,12 @@ function GamePageContent() {
                     gameMode: gameModeFromURL,
                 };
                 transaction.set(gameRef, newGame);
-                setIsHost(true);
             } else {
                 const gameData = gameDoc.data() as Game;
                 const players = gameData.players || [];
 
-                if (players.some((p: Player) => p.name === newPlayer.name)) {
-                    throw new Error(`El nombre "${newPlayer.name}" ya está en uso.`);
+                if (players.some((p: Player) => p.name === newPlayer!.name)) {
+                    throw new Error(`El nombre "${newPlayer!.name}" ya está en uso.`);
                 }
 
                 const updateData: Partial<Game> = {
@@ -174,78 +153,73 @@ function GamePageContent() {
             }
         });
 
-        localStorage.setItem(`player-id-${gameId}`, newPlayer.id);
-        setCurrentPlayer(newPlayer);
+        if (newPlayer) {
+            localStorage.setItem(`player-id-${gameId}`, newPlayer.id);
+            setCurrentPlayer(newPlayer);
+            
+             // If the game was just created, the current user is the host.
+            const gameSnapshot = await getDoc(gameRef);
+            const gameData = gameSnapshot.data() as Game;
+            if (gameData.hostId === newPlayer.id) {
+                setIsHost(true);
+            }
 
-        toast({
-            title: "¡Bienvenido/a!",
-            description: `Te has unido a la partida como ${newPlayer.name}.`,
-        });
-
-    } catch (error: any) {
-        if (error.name === 'FirebaseError') {
-             errorEmitter.emit('permission-error', new FirestorePermissionError({
-                path: gameRef.path,
-                operation: 'write', // This can be create or update
-                requestResourceData: { player: newPlayer },
-            }));
-        } else {
-            console.error("Error al unirse a la partida:", error);
             toast({
-                title: "Error",
-                description: error.message || "No se pudo unir a la partida. Inténtalo de nuevo.",
-                variant: "destructive",
+                title: "¡Bienvenido/a!",
+                description: `Te has unido a la partida como ${newPlayer.name}.`,
             });
         }
+
+    } catch (error: any) {
+        console.error("Error al unirse a la partida:", error);
+        toast({
+            title: "Error",
+            description: error.message || "No se pudo unir a la partida. Inténtalo de nuevo.",
+            variant: "destructive",
+        });
     }
   };
 
   const handleStartGame = async () => {
-    if (!isHost || !db) return;
+    if (!isHost) return;
 
     const gameRef = doc(db, 'games', gameId);
-    const updateData = { phase: 'submission' as const };
-    updateDoc(gameRef, updateData)
-    .then(() => {
+    try {
+        await updateDoc(gameRef, {
+            phase: 'submission'
+        });
         toast({
             title: "¡La partida ha comenzado!",
             description: "Es hora de que cada uno envíe sus frases.",
         });
-    })
-    .catch(async (serverError) => {
-        errorEmitter.emit('permission-error', new FirestorePermissionError({
-            path: gameRef.path,
-            operation: 'update',
-            requestResourceData: updateData,
-        }));
-        console.error("Error al iniciar la partida:", serverError);
+    } catch (error) {
+        console.error("Error al iniciar la partida:", error);
         toast({
             title: "Error",
             description: "No se pudo iniciar la partida.",
             variant: "destructive",
           });
-    });
+    }
   };
 
   const handleCancelGame = async () => {
-    if (!isHost || !db) return;
+    if (!isHost) return;
     const gameRef = doc(db, 'games', gameId);
-    deleteDoc(gameRef).catch(async (serverError) => {
-        errorEmitter.emit('permission-error', new FirestorePermissionError({
-            path: gameRef.path,
-            operation: 'delete',
-        }));
-        console.error("Error canceling game:", serverError);
+    try {
+      await deleteDoc(gameRef);
+      // The onSnapshot listener will handle the redirection for all clients.
+    } catch (error) {
+        console.error("Error canceling game:", error);
         toast({
             title: "Error",
             description: "No se pudo cancelar la partida.",
             variant: "destructive",
         });
-    });
+    }
   };
 
   const handleSubmission = async () => {
-    if (!phrase.trim() || !currentPlayer || !db) return;
+    if (!phrase.trim() || !currentPlayer) return;
     setIsSubmitting(true);
     
     try {
@@ -280,19 +254,12 @@ function GamePageContent() {
       });
 
     } catch (error: any) {
-        if (error.name === 'FirebaseError') {
-            errorEmitter.emit('permission-error', new FirestorePermissionError({
-               path: `games/${gameId}`,
-               operation: 'update',
-           }));
-        } else {
-            console.error("Error submitting phrases:", error);
-            toast({
-                title: "Error",
-                description: error.message || "No se pudo enviar tu frase.",
-                variant: "destructive"
-            });
-        }
+        console.error("Error submitting phrases:", error);
+        toast({
+            title: "Error",
+            description: error.message || "No se pudo enviar tu frase.",
+            variant: "destructive"
+        });
     } finally {
         setIsSubmitting(false);
     }
@@ -303,7 +270,7 @@ function GamePageContent() {
   }
 
   const handleGuessingSubmission = async () => {
-    if (!currentPlayer || !game || !db ) {
+    if (!currentPlayer || !game ) {
         return;
     }
     const phrasesToGuess = shuffledPhrases.filter(p => p.authorId !== currentPlayer.id);
@@ -341,19 +308,12 @@ function GamePageContent() {
           });
 
     } catch (error: any) {
-        if (error.name === 'FirebaseError') {
-             errorEmitter.emit('permission-error', new FirestorePermissionError({
-                path: `games/${gameId}`,
-                operation: 'update',
-            }));
-        } else {
-            console.error("Error submitting guesses:", error);
-            toast({
-                title: "Error",
-                description: "No se pudieron enviar tus adivinanzas.",
-                variant: "destructive"
-            });
-        }
+        console.error("Error submitting guesses:", error);
+        toast({
+            title: "Error",
+            description: "No se pudieron enviar tus adivinanzas.",
+            variant: "destructive"
+        });
     } finally {
         setIsSubmitting(false);
     }

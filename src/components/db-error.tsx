@@ -5,10 +5,11 @@ import { Button } from './ui/button';
 
 type DbErrorProps = {
   message: string;
-  projectId: string;
 };
 
-export function DbError({ message, projectId }: DbErrorProps) {
+export function DbError({ message }: DbErrorProps) {
+  // Extract project ID from modern Firebase config if available, otherwise fallback
+  const projectId = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || "tu-proyecto-de-firebase";
   const firestoreUrl = `https://console.cloud.google.com/datastore/setup?project=${projectId}`;
 
   return (

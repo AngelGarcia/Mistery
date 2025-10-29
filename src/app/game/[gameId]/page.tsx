@@ -3,8 +3,7 @@
 
 import { useState, useEffect, useMemo, Suspense } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
-import { doc, getFirestore, onSnapshot, setDoc, getDoc, updateDoc, arrayUnion, runTransaction, FirestoreError, deleteDoc } from 'firebase/firestore';
-import { app } from '@/lib/firebase';
+import { doc, onSnapshot, setDoc, getDoc, updateDoc, runTransaction, deleteDoc } from 'firebase/firestore';
 import type { Game, Player, Phrase, Guess, GameMode } from '@/lib/types';
 import { getAnonymizedPhrases } from '@/app/actions';
 import { Header } from '@/components/header';
@@ -14,17 +13,12 @@ import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { Badge } from '@/components/ui/badge';
-import { Users, LogIn, Send, Hourglass, Gamepad2, CheckCircle, AlertTriangle, Lightbulb, Trophy, Star, Home, PartyPopper, XCircle } from 'lucide-react';
+import { Users, LogIn, Send, Hourglass, Gamepad2, CheckCircle, Lightbulb, Trophy, Star, Home, PartyPopper, XCircle } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import { DbError } from '@/components/db-error';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-
-let db: any;
-try {
-  db = getFirestore(app);
-} catch (e) {
-  console.error(e);
-}
+import { useFirestore } from '@/firebase';
+import { errorEmitter } from '@/firebase/error-emitter';
+import { FirestorePermissionError } from '@/firebase/errors';
 
 function GamePageContent() {
   const params = useParams();
@@ -33,6 +27,7 @@ function GamePageContent() {
   const gameId = params.gameId as string;
   const gameModeFromURL = searchParams.get('gameMode') as GameMode | null;
   const { toast } = useToast();
+  const db = useFirestore();
 
   const [game, setGame] = useState<Game | null>(null);
   const [currentPlayer, setCurrentPlayer] = useState<Player | null>(null);
@@ -40,63 +35,76 @@ function GamePageContent() {
   const [isHost, setIsHost] = useState(false);
   const [phrase, setPhrase] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [dbError, setDbError] = useState<string | null>(null);
   const [guesses, setGuesses] = useState<Record<string, string>>({});
 
   useEffect(() => {
-    if (!gameId || !db) {
-        setDbError("Firestore is not initialized.");
-        return;
-    };
+    if (!gameId || !db) return;
 
     const gameRef = doc(db, 'games', gameId);
 
-    const unsubscribe = onSnapshot(gameRef, (doc) => {
-      if (doc.exists()) {
-        const gameData = doc.data() as Game;
-        setGame(gameData);
+    const unsubscribe = onSnapshot(gameRef, 
+      (doc) => {
+        if (doc.exists()) {
+          const gameData = doc.data() as Game;
+          setGame(gameData);
 
-        const storedPlayerId = localStorage.getItem(`player-id-${gameId}`);
-        if (storedPlayerId && gameData) {
-          const player = gameData.players.find(p => p.id === storedPlayerId);
-          if (player) {
-            setCurrentPlayer(player);
-            setIsHost(gameData.hostId === player.id);
-          } else {
+          const storedPlayerId = localStorage.getItem(`player-id-${gameId}`);
+          if (storedPlayerId) {
+            const player = gameData.players.find(p => p.id === storedPlayerId);
+            if (player) {
+              setCurrentPlayer(player);
+              setIsHost(gameData.hostId === player.id);
+            } else {
               localStorage.removeItem(`player-id-${gameId}`);
               setCurrentPlayer(null);
               setIsHost(false);
+            }
           }
-        }
-        
-        if (gameData.gameMode === 'who-is-who') {
-            if (gameData?.phase === 'submission' && gameData.players.every(p => p.hasSubmitted)) {
-                const allPhrasesCount = gameData.players.length;
-                if (gameData.phrases?.length === allPhrasesCount) {
-                    updateDoc(gameRef, { phase: 'guessing' });
-                }
+          
+          if (gameData.gameMode === 'who-is-who') {
+              if (gameData?.phase === 'submission' && gameData.players.every(p => p.hasSubmitted)) {
+                  const allPhrasesCount = gameData.players.length;
+                  if (gameData.phrases?.length === allPhrasesCount) {
+                      updateDoc(gameRef, { phase: 'guessing' }).catch(async (serverError) => {
+                        errorEmitter.emit('permission-error', new FirestorePermissionError({
+                            path: gameRef.path,
+                            operation: 'update',
+                            requestResourceData: { phase: 'guessing' },
+                          }));
+                      });
+                  }
+              }
+              if (gameData?.phase === 'guessing' && gameData.players.every(p => p.hasGuessed)) {
+                updateDoc(gameRef, { phase: 'results' }).catch(async (serverError) => {
+                    errorEmitter.emit('permission-error', new FirestorePermissionError({
+                        path: gameRef.path,
+                        operation: 'update',
+                        requestResourceData: { phase: 'results' },
+                      }));
+                });
+              }
+          }
+        } else {
+            if (game) { 
+                toast({
+                    title: "Partida cancelada",
+                    description: "La partida ha sido cancelada por el anfitrión.",
+                });
+                router.push('/');
             }
-            if (gameData?.phase === 'guessing' && gameData.players.every(p => p.hasGuessed)) {
-              updateDoc(gameRef, { phase: 'results' });
-            }
+            setGame(null);
         }
-
-      } else {
-        if (game) { // If a game existed and now it doesn't, it was cancelled.
-            toast({
-                title: "Partida cancelada",
-                description: "La partida ha sido cancelada por el anfitrión.",
-            });
-            router.push('/');
-        }
-        setGame(null);
+      }, 
+      async (error) => {
+        errorEmitter.emit('permission-error', new FirestorePermissionError({
+            path: gameRef.path,
+            operation: 'list',
+          }));
       }
-    }, (error) => {
-        handleFirestoreError(error);
-    });
+    );
 
     return () => unsubscribe();
-  }, [gameId, router, toast]);
+  }, [gameId, db, router, toast, game]);
 
   const shuffledPhrases = useMemo(() => {
     if (game?.phrases) {
@@ -113,27 +121,19 @@ function GamePageContent() {
     return [];
   }, [game?.phrases, gameId]);
 
-
-  const handleFirestoreError = (error: any) => {
-    console.error("Firestore Error:", error);
-    if (error instanceof FirestoreError && (error.code === 'failed-precondition' || error.code === 'unimplemented' || error.message.includes('does not exist'))) {
-        setDbError("La base de datos de Firestore no está activada. Por favor, actívala en la consola de Firebase para continuar.");
-    }
-  }
-  
   const handleJoinGame = async () => {
-    if (!playerName.trim() || !gameId || dbError) return;
-    
+    if (!playerName.trim() || !gameId || !db) return;
+
     const newPlayer: Player = {
-      id: crypto.randomUUID(),
-      name: playerName.trim(),
-      hasSubmitted: false,
-      hasGuessed: false,
+        id: crypto.randomUUID(),
+        name: playerName.trim(),
+        hasSubmitted: false,
+        hasGuessed: false,
     };
-    
+
+    const gameRef = doc(db, 'games', gameId);
+
     try {
-        const gameRef = doc(db, 'games', gameId);
-        
         await runTransaction(db, async (transaction) => {
             const gameDoc = await transaction.get(gameRef);
             if (!gameDoc.exists()) {
@@ -145,98 +145,107 @@ function GamePageContent() {
                     });
                     throw new Error("Game mode not specified");
                 }
-               const newGame: Game = {
-                id: gameId,
-                phase: 'lobby',
-                players: [newPlayer],
-                hostId: newPlayer.id,
-                gameMode: gameModeFromURL,
-              };
-              transaction.set(gameRef, newGame);
-              setIsHost(true);
+                const newGame: Game = {
+                    id: gameId,
+                    phase: 'lobby',
+                    players: [newPlayer],
+                    hostId: newPlayer.id,
+                    gameMode: gameModeFromURL,
+                };
+                transaction.set(gameRef, newGame);
+                setIsHost(true);
             } else {
                 const gameData = gameDoc.data() as Game;
                 const players = gameData.players || [];
-                
+
                 if (players.some((p: Player) => p.name === newPlayer.name)) {
                     throw new Error(`El nombre "${newPlayer.name}" ya está en uso.`);
                 }
-        
+
                 const updateData: Partial<Game> = {
                     players: [...players, newPlayer]
                 };
-        
+
                 if (!gameData.hostId) {
                     updateData.hostId = newPlayer.id;
                 }
-        
+
                 transaction.update(gameRef, updateData);
             }
         });
-        
+
         localStorage.setItem(`player-id-${gameId}`, newPlayer.id);
         setCurrentPlayer(newPlayer);
-  
+
         toast({
-          title: "¡Bienvenido/a!",
-          description: `Te has unido a la partida como ${newPlayer.name}.`,
+            title: "¡Bienvenido/a!",
+            description: `Te has unido a la partida como ${newPlayer.name}.`,
         });
-  
-      } catch (error: any) {
-        handleFirestoreError(error);
-        if (!(error instanceof FirestoreError)) {
-          console.error("Error al unirse a la partida:", error);
-          toast({
-              title: "Error",
-              description: error.message || "No se pudo unir a la partida. Inténtalo de nuevo.",
-              variant: "destructive",
-          });
+
+    } catch (error: any) {
+        if (error.name === 'FirebaseError') {
+             errorEmitter.emit('permission-error', new FirestorePermissionError({
+                path: gameRef.path,
+                operation: 'write', // This can be create or update
+                requestResourceData: { player: newPlayer },
+            }));
+        } else {
+            console.error("Error al unirse a la partida:", error);
+            toast({
+                title: "Error",
+                description: error.message || "No se pudo unir a la partida. Inténtalo de nuevo.",
+                variant: "destructive",
+            });
         }
-      }
+    }
   };
 
   const handleStartGame = async () => {
-    if (!isHost || dbError) return;
+    if (!isHost || !db) return;
 
-    try {
-        const gameRef = doc(db, 'games', gameId);
-        await updateDoc(gameRef, {
-            phase: 'submission'
-        });
+    const gameRef = doc(db, 'games', gameId);
+    const updateData = { phase: 'submission' as const };
+    updateDoc(gameRef, updateData)
+    .then(() => {
         toast({
             title: "¡La partida ha comenzado!",
             description: "Es hora de que cada uno envíe sus frases.",
         });
-    } catch (error) {
-        handleFirestoreError(error);
-        console.error("Error al iniciar la partida:", error);
+    })
+    .catch(async (serverError) => {
+        errorEmitter.emit('permission-error', new FirestorePermissionError({
+            path: gameRef.path,
+            operation: 'update',
+            requestResourceData: updateData,
+        }));
+        console.error("Error al iniciar la partida:", serverError);
         toast({
             title: "Error",
             description: "No se pudo iniciar la partida.",
             variant: "destructive",
           });
-    }
+    });
   };
 
   const handleCancelGame = async () => {
-    if (!isHost || dbError) return;
-    try {
-        const gameRef = doc(db, 'games', gameId);
-        await deleteDoc(gameRef);
-    } catch (error) {
-        handleFirestoreError(error);
-        console.error("Error canceling game:", error);
+    if (!isHost || !db) return;
+    const gameRef = doc(db, 'games', gameId);
+    deleteDoc(gameRef).catch(async (serverError) => {
+        errorEmitter.emit('permission-error', new FirestorePermissionError({
+            path: gameRef.path,
+            operation: 'delete',
+        }));
+        console.error("Error canceling game:", serverError);
         toast({
             title: "Error",
             description: "No se pudo cancelar la partida.",
             variant: "destructive",
         });
-    }
+    });
   };
 
-
   const handleSubmission = async () => {
-    if (!phrase.trim() || !currentPlayer || dbError) return;
+    if (!phrase.trim() || !currentPlayer || !db) return;
     setIsSubmitting(true);
     
     try {
@@ -271,8 +280,12 @@ function GamePageContent() {
       });
 
     } catch (error: any) {
-        handleFirestoreError(error);
-        if (!(error instanceof FirestoreError)){
+        if (error.name === 'FirebaseError') {
+            errorEmitter.emit('permission-error', new FirestorePermissionError({
+               path: `games/${gameId}`,
+               operation: 'update',
+           }));
+        } else {
             console.error("Error submitting phrases:", error);
             toast({
                 title: "Error",
@@ -290,7 +303,7 @@ function GamePageContent() {
   }
 
   const handleGuessingSubmission = async () => {
-    if (!currentPlayer || !game ) {
+    if (!currentPlayer || !game || !db ) {
         return;
     }
     const phrasesToGuess = shuffledPhrases.filter(p => p.authorId !== currentPlayer.id);
@@ -312,7 +325,6 @@ function GamePageContent() {
             const gameDoc = await transaction.get(gameRef);
             if (!gameDoc.exists()) throw new Error("Game not found");
             
-            const currentGuesses = gameDoc.data().guesses || {};
             const updatedPlayers = gameDoc.data().players.map((p: Player) => 
                 p.id === currentPlayer.id ? { ...p, hasGuessed: true } : p
             );
@@ -328,14 +340,20 @@ function GamePageContent() {
             description: "Esperando a que el resto de jugadores terminen...",
           });
 
-    } catch (error) {
-        handleFirestoreError(error);
-        console.error("Error submitting guesses:", error);
-        toast({
-            title: "Error",
-            description: "No se pudieron enviar tus adivinanzas.",
-            variant: "destructive"
-        });
+    } catch (error: any) {
+        if (error.name === 'FirebaseError') {
+             errorEmitter.emit('permission-error', new FirestorePermissionError({
+                path: `games/${gameId}`,
+                operation: 'update',
+            }));
+        } else {
+            console.error("Error submitting guesses:", error);
+            toast({
+                title: "Error",
+                description: "No se pudieron enviar tus adivinanzas.",
+                variant: "destructive"
+            });
+        }
     } finally {
         setIsSubmitting(false);
     }
@@ -345,8 +363,13 @@ function GamePageContent() {
     router.push(`/`);
   };
 
-  if (dbError) {
-    return <DbError message={dbError} projectId="studio-7956312296-90b9d" />
+  if (!db) {
+    return (
+        <div className="flex items-center justify-center min-h-screen">
+          <Hourglass className="animate-spin" /> 
+          <span className="ml-2">Conectando con la base de datos...</span>
+        </div>
+    );
   }
 
   if (!game && !currentPlayer) {
@@ -366,9 +389,8 @@ function GamePageContent() {
                         value={playerName}
                         onChange={(e) => setPlayerName(e.target.value)}
                         onKeyDown={(e) => e.key === 'Enter' && handleJoinGame()}
-                        disabled={!!dbError}
                     />
-                    <Button onClick={handleJoinGame} className="w-full" disabled={!playerName.trim() || !!dbError}>
+                    <Button onClick={handleJoinGame} className="w-full" disabled={!playerName.trim()}>
                         <LogIn className="mr-2"/>
                         Unirse o Crear Partida
                     </Button>
@@ -414,9 +436,8 @@ function GamePageContent() {
                         value={playerName}
                         onChange={(e) => setPlayerName(e.target.value)}
                         onKeyDown={(e) => e.key === 'Enter' && handleJoinGame()}
-                        disabled={!!dbError}
                     />
-                    <Button onClick={handleJoinGame} className="w-full" disabled={!playerName.trim() || !!dbError}>
+                    <Button onClick={handleJoinGame} className="w-full" disabled={!playerName.trim()}>
                         <LogIn className="mr-2"/>
                         Unirse al Lobby
                     </Button>
@@ -704,7 +725,6 @@ const renderWhoIsWhoGame = () => {
        <main className="flex-1 container mx-auto p-4 md:p-8">
         {game.gameMode === 'who-is-who' && renderWhoIsWhoGame()}
         {game.gameMode === 'two-truths-one-lie' && (
-            // Placeholder for the new game mode
              <Card>
                 <CardHeader>
                     <CardTitle>Dos Verdades y una Mentira</CardTitle>
@@ -726,3 +746,5 @@ export default function GamePage() {
         </Suspense>
     )
 }
+
+    

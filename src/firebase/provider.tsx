@@ -1,15 +1,16 @@
 
 'use client';
-import { createContext, useContext, type PropsWithChildren } from 'react';
+import { createContext, useContext, type PropsWithChildren, useState, useEffect } from 'react';
 import type { FirebaseApp } from 'firebase/app';
 import type { Auth } from 'firebase/auth';
 import type { Firestore } from 'firebase/firestore';
+import { initializeFirebase } from './index';
 import { FirebaseErrorListener } from '@/components/FirebaseErrorListener';
 
 export interface FirebaseProviderProps extends PropsWithChildren {
-  app: FirebaseApp;
-  auth: Auth;
-  firestore: Firestore;
+  app?: FirebaseApp;
+  auth?: Auth;
+  firestore?: Firestore;
 }
 
 const FirebaseContext = createContext<FirebaseProviderProps | undefined>(undefined);
@@ -47,4 +48,3 @@ export const useFirestore = () => {
     }
     return context.firestore;
 };
-

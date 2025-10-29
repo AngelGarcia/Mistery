@@ -16,7 +16,10 @@ import { Badge } from '@/components/ui/badge';
 import { Users, LogIn, Send, Hourglass, Gamepad2, CheckCircle, Lightbulb, Trophy, Star, Home, PartyPopper, XCircle } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { db } from '@/lib/firebase';
+import { useFirestore } from '@/firebase';
+import { errorEmitter } from '@/firebase/error-emitter';
+import { FirestorePermissionError } from '@/firebase/errors';
+
 
 function GamePageContent() {
   const params = useParams();
@@ -25,6 +28,7 @@ function GamePageContent() {
   const gameId = params.gameId as string;
   const gameModeFromURL = searchParams.get('gameMode') as GameMode | null;
   const { toast } = useToast();
+  const firestore = useFirestore();
 
   const [game, setGame] = useState<Game | null>(null);
   const [currentPlayer, setCurrentPlayer] = useState<Player | null>(null);
@@ -35,11 +39,12 @@ function GamePageContent() {
   const [guesses, setGuesses] = useState<Record<string, string>>({});
 
   useEffect(() => {
-    if (!gameId) return;
+    if (!gameId || !firestore) return;
 
-    const gameRef = doc(db, 'games', gameId);
+    const gameRef = doc(firestore, 'games', gameId);
 
-    const unsubscribe = onSnapshot(gameRef, (doc) => {
+    const unsubscribe = onSnapshot(gameRef,
+      (doc) => {
         if (doc.exists()) {
           const gameData = doc.data() as Game;
           setGame(gameData);
@@ -51,7 +56,6 @@ function GamePageContent() {
               setCurrentPlayer(player);
               setIsHost(gameData.hostId === player.id);
             } else {
-              // The stored player ID is not in the current game state, so remove it.
               localStorage.removeItem(`player-id-${gameId}`);
               setCurrentPlayer(null);
               setIsHost(false);
@@ -79,10 +83,18 @@ function GamePageContent() {
             }
             setGame(null);
         }
-    });
+      }, 
+      async (error) => {
+        errorEmitter.emit('permission-error', new FirestorePermissionError({
+            path: gameRef.path,
+            operation: 'list',
+          }));
+        console.error("Error en snapshot de partida:", error);
+      }
+    );
 
     return () => unsubscribe();
-  }, [gameId, router, toast, game]);
+  }, [gameId, router, toast, firestore]);
 
   const shuffledPhrases = useMemo(() => {
     if (game?.phrases) {
@@ -100,13 +112,13 @@ function GamePageContent() {
   }, [game?.phrases, gameId]);
 
   const handleJoinGame = async () => {
-    if (!playerName.trim() || !gameId) return;
+    if (!playerName.trim() || !gameId || !firestore) return;
 
-    const gameRef = doc(db, 'games', gameId);
+    const gameRef = doc(firestore, 'games', gameId);
     let newPlayer: Player | null = null;
     
     try {
-        await runTransaction(db, async (transaction) => {
+        await runTransaction(firestore, async (transaction) => {
             const gameDoc = await transaction.get(gameRef);
             
             newPlayer = {
@@ -157,7 +169,6 @@ function GamePageContent() {
             localStorage.setItem(`player-id-${gameId}`, newPlayer.id);
             setCurrentPlayer(newPlayer);
             
-             // If the game was just created, the current user is the host.
             const gameSnapshot = await getDoc(gameRef);
             const gameData = gameSnapshot.data() as Game;
             if (gameData.hostId === newPlayer.id) {
@@ -171,6 +182,10 @@ function GamePageContent() {
         }
 
     } catch (error: any) {
+        errorEmitter.emit('permission-error', new FirestorePermissionError({
+            path: gameRef.path,
+            operation: 'write',
+        }));
         console.error("Error al unirse a la partida:", error);
         toast({
             title: "Error",
@@ -181,45 +196,52 @@ function GamePageContent() {
   };
 
   const handleStartGame = async () => {
-    if (!isHost) return;
+    if (!isHost || !firestore) return;
 
-    const gameRef = doc(db, 'games', gameId);
-    try {
-        await updateDoc(gameRef, {
-            phase: 'submission'
-        });
+    const gameRef = doc(firestore, 'games', gameId);
+    const dataToUpdate = { phase: 'submission' };
+    updateDoc(gameRef, dataToUpdate)
+      .then(() => {
         toast({
-            title: "¡La partida ha comenzado!",
-            description: "Es hora de que cada uno envíe sus frases.",
+          title: "¡La partida ha comenzado!",
+          description: "Es hora de que cada uno envíe sus frases.",
         });
-    } catch (error) {
+      })
+      .catch((error) => {
+        errorEmitter.emit('permission-error', new FirestorePermissionError({
+            path: gameRef.path,
+            operation: 'update',
+            requestResourceData: dataToUpdate,
+        }));
         console.error("Error al iniciar la partida:", error);
         toast({
             title: "Error",
             description: "No se pudo iniciar la partida.",
             variant: "destructive",
           });
-    }
+      });
   };
 
   const handleCancelGame = async () => {
-    if (!isHost) return;
-    const gameRef = doc(db, 'games', gameId);
-    try {
-      await deleteDoc(gameRef);
-      // The onSnapshot listener will handle the redirection for all clients.
-    } catch (error) {
-        console.error("Error canceling game:", error);
-        toast({
-            title: "Error",
-            description: "No se pudo cancelar la partida.",
-            variant: "destructive",
+    if (!isHost || !firestore) return;
+    const gameRef = doc(firestore, 'games', gameId);
+    deleteDoc(gameRef)
+        .catch((error) => {
+            errorEmitter.emit('permission-error', new FirestorePermissionError({
+                path: gameRef.path,
+                operation: 'delete',
+            }));
+            console.error("Error canceling game:", error);
+            toast({
+                title: "Error",
+                description: "No se pudo cancelar la partida.",
+                variant: "destructive",
+            });
         });
-    }
   };
 
   const handleSubmission = async () => {
-    if (!phrase.trim() || !currentPlayer) return;
+    if (!phrase.trim() || !currentPlayer || !firestore) return;
     setIsSubmitting(true);
     
     try {
@@ -232,8 +254,8 @@ function GamePageContent() {
         authorId: currentPlayer.id,
       };
 
-      const gameRef = doc(db, 'games', gameId);
-      await runTransaction(db, async (transaction) => {
+      const gameRef = doc(firestore, 'games', gameId);
+      await runTransaction(firestore, async (transaction) => {
         const gameDoc = await transaction.get(gameRef);
         if (!gameDoc.exists()) throw new Error("Game not found");
         
@@ -254,6 +276,11 @@ function GamePageContent() {
       });
 
     } catch (error: any) {
+        const gameRef = doc(firestore, 'games', gameId);
+        errorEmitter.emit('permission-error', new FirestorePermissionError({
+            path: gameRef.path,
+            operation: 'update',
+        }));
         console.error("Error submitting phrases:", error);
         toast({
             title: "Error",
@@ -270,7 +297,7 @@ function GamePageContent() {
   }
 
   const handleGuessingSubmission = async () => {
-    if (!currentPlayer || !game ) {
+    if (!currentPlayer || !game || !firestore) {
         return;
     }
     const phrasesToGuess = shuffledPhrases.filter(p => p.authorId !== currentPlayer.id);
@@ -287,8 +314,8 @@ function GamePageContent() {
     }));
     
     try {
-        const gameRef = doc(db, 'games', gameId);
-        await runTransaction(db, async (transaction) => {
+        const gameRef = doc(firestore, 'games', gameId);
+        await runTransaction(firestore, async (transaction) => {
             const gameDoc = await transaction.get(gameRef);
             if (!gameDoc.exists()) throw new Error("Game not found");
             
@@ -308,6 +335,11 @@ function GamePageContent() {
           });
 
     } catch (error: any) {
+        const gameRef = doc(firestore, 'games', gameId);
+        errorEmitter.emit('permission-error', new FirestorePermissionError({
+            path: gameRef.path,
+            operation: 'update',
+        }));
         console.error("Error submitting guesses:", error);
         toast({
             title: "Error",
@@ -323,7 +355,7 @@ function GamePageContent() {
     router.push(`/`);
   };
 
-  if (!db) {
+  if (!firestore) {
     return (
         <div className="flex items-center justify-center min-h-screen">
           <Hourglass className="animate-spin" /> 
@@ -706,5 +738,3 @@ export default function GamePage() {
         </Suspense>
     )
 }
-
-    

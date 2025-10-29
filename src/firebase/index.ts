@@ -25,4 +25,5 @@ export function initializeFirebase() {
   return { app, auth, firestore };
 }
 
+export { useFirebaseApp, useAuth, useFirestore } from './provider';
     

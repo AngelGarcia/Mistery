@@ -1,15 +1,11 @@
-
 rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
+    // Allow anyone to read, create, update, and delete game documents.
+    // This is suitable for a public, anonymous game.
     match /games/{gameId} {
-      // Allow anyone to read, update, or delete a specific game document.
-      allow get, update, delete: if true;
-    }
-    match /games/{gameId} {
-        // Allow anyone to create a new game document.
-        allow create: if true;
+      allow read, write: if true;
     }
   }
 }

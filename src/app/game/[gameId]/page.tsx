@@ -87,7 +87,7 @@ function GamePageContent() {
       async (error) => {
         errorEmitter.emit('permission-error', new FirestorePermissionError({
             path: gameRef.path,
-            operation: 'list',
+            operation: 'get',
           }));
         console.error("Error en snapshot de partida:", error);
       }
@@ -647,6 +647,7 @@ function GamePageContent() {
                                 <AccordionTrigger>
                                     <div className="text-left">
                                         <p className="italic">"{phrase.anonymizedText}"</p>
+
                                         <p className="text-sm text-muted-foreground mt-1">
                                             Escrita por: <span className="font-semibold text-primary">{getPlayerName(phrase.authorId)}</span>
                                         </p>

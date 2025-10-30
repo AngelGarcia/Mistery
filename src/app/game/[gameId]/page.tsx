@@ -355,15 +355,6 @@ function GamePageContent() {
     router.push(`/`);
   };
 
-  if (!firestore) {
-    return (
-        <div className="flex items-center justify-center min-h-screen">
-          <Hourglass className="animate-spin" /> 
-          <span className="ml-2">Conectando con la base de datos...</span>
-        </div>
-    );
-  }
-
   if (!game && !currentPlayer) {
     return (
        <div className="flex flex-col min-h-screen">

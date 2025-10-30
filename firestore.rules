@@ -2,14 +2,9 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Rules for the 'games' collection
+    // Allow clients to create new game documents
     match /games/{gameId} {
-
-      // Allow anyone to create a new game document.
-      allow create: if true;
-      
-      // Allow anyone to read, update, or delete an existing game document.
-      allow read, update, delete: if true;
+      allow create, read, update, delete: if true;
     }
   }
 }

@@ -2,11 +2,14 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Allow anyone to read, create, update, or delete documents in the 'games' collection.
-    // This rule is open for this public game, but for apps with user data,
-    // you would use 'request.auth.uid' to restrict access.
+    // Rules for the 'games' collection
     match /games/{gameId} {
-      allow read, write: if true;
+
+      // Allow anyone to create a new game document.
+      allow create: if true;
+      
+      // Allow anyone to read, update, or delete an existing game document.
+      allow read, update, delete: if true;
     }
   }
 }

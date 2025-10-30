@@ -2,9 +2,11 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Allow clients to create new game documents
     match /games/{gameId} {
-      allow create, read, update, delete: if true;
+      // Allow anyone to read or write to the games collection.
+      // This is necessary for creating, joining, and playing the game
+      // without requiring user authentication.
+      allow read, write: if true;
     }
   }
 }

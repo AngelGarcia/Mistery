@@ -3,7 +3,10 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     match /games/{gameId} {
-      allow get, list: if true;
+      // Allow anyone to read, create, update, or delete game documents.
+      // In a production app, you would want to secure this further.
+      // For example, only allow players in the game to write to it.
+      allow read, write: if true;
     }
   }
 }

@@ -43,7 +43,7 @@ function GamePageContent() {
   
   // State for "Two Truths, One Lie"
   const [statements, setStatements] = useState<[string, string, string]>(['', '', '']);
-  const [lieIndex, setLieIndex] = useState<number | null>(null);
+  const LIE_INDEX = 2; // The lie is always the last statement
 
   useEffect(() => {
     if (!gameId || !firestore) return;
@@ -224,22 +224,21 @@ function GamePageContent() {
   const handleCancelGame = async () => {
     if (!isHost || !firestore) return;
     const gameRef = doc(firestore, 'games', gameId);
-    await deleteDoc(gameRef)
-      .then(() => {
+    try {
+        await deleteDoc(gameRef);
         router.push('/');
-      })
-      .catch((error) => {
+    } catch (error) {
         errorEmitter.emit('permission-error', new FirestorePermissionError({
-          path: gameRef.path,
-          operation: 'delete',
+            path: gameRef.path,
+            operation: 'delete',
         }));
         console.error("Error canceling game:", error);
         toast({
-          title: "Error",
-          description: "No se pudo cancelar la partida.",
-          variant: "destructive",
+            title: "Error",
+            description: "No se pudo cancelar la partida.",
+            variant: "destructive",
         });
-      });
+    }
   };
 
   const handleSubmission = async () => {
@@ -354,10 +353,10 @@ function GamePageContent() {
   };
 
   const handleTwoTruthsSubmission = async () => {
-    if (!currentPlayer || !firestore || statements.some(s => !s.trim()) || lieIndex === null) {
+    if (!currentPlayer || !firestore || statements.some(s => !s.trim())) {
       toast({
         title: "Error",
-        description: "Por favor, completa las tres frases y marca una como la mentira.",
+        description: "Por favor, completa las tres frases.",
         variant: "destructive"
       });
       return;
@@ -367,7 +366,7 @@ function GamePageContent() {
     const newStatement: TwoTruthsOneLieStatement = {
       authorId: currentPlayer.id,
       statements: statements,
-      lieIndex: lieIndex
+      lieIndex: LIE_INDEX
     };
 
     try {
@@ -536,11 +535,11 @@ function GamePageContent() {
   
   const renderSubmissionStatus = (phase: "submission" | "guessing") => (
     <Card className="w-full max-w-2xl mx-auto">
-      <CardHeader>
+        <CardHeader>
             <CardTitle>Esperando al resto</CardTitle>
             <CardDescription>La siguiente fase comenzará cuando todos hayan terminado.</CardDescription>
-      </CardHeader>
-      <CardContent>
+        </CardHeader>
+        <CardContent>
             <ul className="space-y-3">
                 {game.players.map(p => (
                     <li key={p.id} className="flex items-center justify-between p-3 bg-primary/10 rounded-lg">
@@ -557,7 +556,7 @@ function GamePageContent() {
                     </li>
                 ))}
             </ul>
-      </CardContent>
+        </CardContent>
     </Card>
   );
 
@@ -593,32 +592,50 @@ function GamePageContent() {
         setStatements(newStatements);
     }
     
-    const allFilled = statements.every(s => s.trim() !== '') && lieIndex !== null;
+    const allFilled = statements.every(s => s.trim() !== '');
 
     return (
         <Card className="w-full max-w-2xl mx-auto">
             <CardHeader>
                 <CardTitle>Dos Verdades y una Mentira</CardTitle>
-                <CardDescription>Escribe tres afirmaciones sobre ti. Dos deben ser verdaderas y una falsa. Marca la que sea mentira.</CardDescription>
+                <CardDescription>Escribe dos afirmaciones verdaderas y una falsa sobre ti.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
-                <RadioGroup value={lieIndex !== null ? `${lieIndex}` : undefined} onValueChange={(val) => setLieIndex(parseInt(val))}>
-                    {[0, 1, 2].map(index => (
-                        <div key={index} className="flex flex-col space-y-2">
-                             <Textarea
-                                placeholder={`Frase ${index + 1}...`}
-                                value={statements[index]}
-                                onChange={(e) => handleStatementChange(index, e.target.value)}
-                                disabled={isSubmitting}
-                                className="text-base"
-                            />
-                            <div className="flex items-center space-x-2">
-                                <RadioGroupItem value={`${index}`} id={`lie-${index}`} />
-                                <Label htmlFor={`lie-${index}`}>Esta es la mentira</Label>
-                            </div>
-                        </div>
-                    ))}
-                </RadioGroup>
+                <div className="space-y-4">
+                    <div className="space-y-2">
+                        <Label htmlFor="truth-1" className="text-green-700 dark:text-green-400">Verdad 1</Label>
+                        <Textarea
+                            id="truth-1"
+                            placeholder="Escribe una afirmación verdadera..."
+                            value={statements[0]}
+                            onChange={(e) => handleStatementChange(0, e.target.value)}
+                            disabled={isSubmitting}
+                            className="bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800 focus-visible:ring-green-500"
+                        />
+                    </div>
+                    <div className="space-y-2">
+                        <Label htmlFor="truth-2" className="text-green-700 dark:text-green-400">Verdad 2</Label>
+                        <Textarea
+                            id="truth-2"
+                            placeholder="Escribe otra afirmación verdadera..."
+                            value={statements[1]}
+                            onChange={(e) => handleStatementChange(1, e.target.value)}
+                            disabled={isSubmitting}
+                            className="bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800 focus-visible:ring-green-500"
+                        />
+                    </div>
+                    <div className="space-y-2">
+                        <Label htmlFor="lie" className="text-red-700 dark:text-red-400">La Mentira</Label>
+                        <Textarea
+                            id="lie"
+                            placeholder="Escribe tu mentira aquí..."
+                            value={statements[2]}
+                            onChange={(e) => handleStatementChange(2, e.target.value)}
+                            disabled={isSubmitting}
+                            className="bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800 focus-visible:ring-red-500"
+                        />
+                    </div>
+                </div>
 
                  <Button onClick={handleTwoTruthsSubmission} className="w-full" disabled={!allFilled || isSubmitting}>
                     {isSubmitting ? <Hourglass className="mr-2 animate-spin"/> : <Send className="mr-2"/>}

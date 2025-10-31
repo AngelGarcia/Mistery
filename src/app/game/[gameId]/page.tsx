@@ -88,7 +88,7 @@ function GamePageContent() {
     );
 
     return () => unsubscribe();
-  }, [gameId, router, toast, firestore]);
+  }, [gameId, firestore, router, toast]);
   
   // Effect to handle automatic game phase progression
   useEffect(() => {
@@ -209,10 +209,12 @@ function GamePageContent() {
                     players: [newPlayer],
                     hostId: newPlayer.id,
                     gameMode: gameModeFromURL,
-                    currentStatementIndex: 0,
-                    statements: [],
-                    twoTruthsGuesses: {},
                 };
+                 if (gameModeFromURL === 'two-truths-one-lie') {
+                    newGame.currentStatementIndex = 0;
+                    newGame.statements = [];
+                    newGame.twoTruthsGuesses = {};
+                }
                 transaction.set(gameRef, newGame);
             } else {
                 const gameData = gameDoc.data() as Game;

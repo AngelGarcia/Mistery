@@ -116,6 +116,7 @@ function GamePageContent() {
 
     const gameRef = doc(firestore, 'games', gameId);
     let newPlayer: Player | null = null;
+    let isNewGame = false;
     
     try {
         await runTransaction(firestore, async (transaction) => {
@@ -137,6 +138,7 @@ function GamePageContent() {
                     });
                     throw new Error("Game mode not specified");
                 }
+                isNewGame = true;
                 const newGame: Game = {
                     id: gameId,
                     phase: 'lobby',
@@ -169,9 +171,7 @@ function GamePageContent() {
             localStorage.setItem(`player-id-${gameId}`, newPlayer.id);
             setCurrentPlayer(newPlayer);
             
-            const gameSnapshot = await getDoc(gameRef);
-            const gameData = gameSnapshot.data() as Game;
-            if (gameData.hostId === newPlayer.id) {
+            if (isNewGame) {
                 setIsHost(true);
             }
 
@@ -499,7 +499,7 @@ function GamePageContent() {
                     </li>
                 ))}
             </ul>
-       </CardContent>
+       CardContent>
     </Card>
  );
 
@@ -511,7 +511,7 @@ function GamePageContent() {
         <CardDescription>
           Escribe una frase personal y única. Será anonimizada y el resto
           de jugadores tendrán que adivinar que es tuya.
-        </CardDescription>
+        CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         <Textarea 
@@ -616,7 +616,7 @@ function GamePageContent() {
                 <CardTitle className="flex items-center gap-2 text-2xl">
                     <Trophy className="text-amber-500"/>
                     ¡Resultados Finales!
-                </CardTitle>
+                CardTitle>
                 <CardDescription>Veamos quién conoce mejor a los demás.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-8">
@@ -730,3 +730,5 @@ export default function GamePage() {
         </Suspense>
     )
 }
+
+    

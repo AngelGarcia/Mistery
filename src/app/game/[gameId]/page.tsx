@@ -45,9 +45,22 @@ function GamePageContent() {
   const [statements, setStatements] = useState<[string, string, string]>(['', '', '']);
   const LIE_INDEX = 2; // The lie is always the last statement
 
+  // Restore player session from localStorage on initial load
+  useEffect(() => {
+    if (!gameId) return;
+    const storedPlayerId = localStorage.getItem(`player-id-${gameId}`);
+    if (storedPlayerId) {
+        // We don't have the player object yet, but we can optimistically set a temporary one
+        // The main onSnapshot listener will fill in the details.
+        setCurrentPlayer({ id: storedPlayerId, name: '...' });
+    }
+  }, [gameId]);
+
+
   // Main listener for game state changes from Firestore
   useEffect(() => {
-    if (!gameId || !firestore) return;
+    // Only subscribe if we have a player and a valid firestore instance
+    if (!gameId || !firestore || !currentPlayer?.id) return;
 
     const gameRef = doc(firestore, 'games', gameId);
 
@@ -57,24 +70,26 @@ function GamePageContent() {
           const gameData = doc.data() as Game;
           setGame(gameData);
 
-          const storedPlayerId = localStorage.getItem(`player-id-${gameId}`);
-          if (storedPlayerId) {
-            const player = gameData.players.find(p => p.id === storedPlayerId);
-             if (player) {
-              setCurrentPlayer(player);
-              setIsHost(gameData.hostId === player.id);
-            } else {
-              localStorage.removeItem(`player-id-${gameId}`);
-              setCurrentPlayer(null);
-              setIsHost(false);
-            }
+          const player = gameData.players.find(p => p.id === currentPlayer.id);
+          if (player) {
+            setCurrentPlayer(player); // Update with full player data
+            setIsHost(gameData.hostId === player.id);
+          } else {
+            // Player was removed or ID is stale.
+            localStorage.removeItem(`player-id-${gameId}`);
+            setCurrentPlayer(null);
+            setIsHost(false);
           }
         } else {
-            toast({
-                title: "Partida cancelada",
-                description: "La partida ha sido cancelada por el anfitrión.",
-            });
-            router.push('/');
+            // This is hit when the game document is deleted (e.g., host cancels)
+            // Or if we subscribed before the document was created (race condition)
+            if (game) { // Only show toast if we previously had a game object
+                 toast({
+                    title: "Partida cancelada",
+                    description: "La partida ha sido cancelada por el anfitrión.",
+                });
+                router.push('/');
+            }
             setGame(null);
         }
       }, 
@@ -88,7 +103,7 @@ function GamePageContent() {
     );
 
     return () => unsubscribe();
-  }, [gameId, firestore, router, toast]);
+  }, [gameId, firestore, currentPlayer?.id, router, toast]);
   
   // Effect to handle automatic game phase progression
   useEffect(() => {
@@ -230,16 +245,8 @@ function GamePageContent() {
         });
 
         localStorage.setItem(`player-id-${gameId}`, newPlayer.id);
-        setCurrentPlayer(newPlayer);
+        setCurrentPlayer(newPlayer); // This will trigger the onSnapshot useEffect
         
-        // This is now safe as the transaction is complete
-        const finalGameDoc = await getDoc(gameRef);
-        if (finalGameDoc.exists() && finalGameDoc.data().hostId === newPlayer.id) {
-            setIsHost(true);
-        } else {
-            setIsHost(false);
-        }
-
         toast({
             title: '¡Bienvenido/a!',
             description: `Te has unido a la partida como ${newPlayer.name}.`,
@@ -253,7 +260,7 @@ function GamePageContent() {
             variant: 'destructive',
         });
         localStorage.removeItem(`player-id-${gameId}`);
-        setCurrentPlayer(null);
+        setCurrentPlayer(null); // Reset player on failure
         setIsHost(false);
     }
 };
@@ -290,7 +297,7 @@ function GamePageContent() {
     const gameRef = doc(firestore, 'games', gameId);
     try {
         await deleteDoc(gameRef);
-        // Force redirect for the host
+        // Force redirect for the host, other players will be redirected by onSnapshot
         router.push('/');
     } catch (error) {
         errorEmitter.emit('permission-error', new FirestorePermissionError({
@@ -505,7 +512,7 @@ function GamePageContent() {
     router.push(`/`);
   };
 
-  if (!game && !currentPlayer) {
+  if (!currentPlayer) {
     return (
        <div className="flex flex-col min-h-screen">
         <Header />
@@ -534,53 +541,15 @@ function GamePageContent() {
     );
   }
   
-  if (!game && currentPlayer) {
-    return (
-        <div className="flex items-center justify-center min-h-screen">
-          <Hourglass className="animate-spin" /> 
-          <span className="ml-2">Creando partida...</span>
-        </div>
-    );
-  }
-
   if (!game) {
-       return (
+    return (
         <div className="flex items-center justify-center min-h-screen">
           <Hourglass className="animate-spin" /> 
-          <span className="ml-2">Cargando partida...</span>
+          <span className="ml-2">Conectando a la partida...</span>
         </div>
     );
   }
 
-  if (!currentPlayer) {
-    return (
-       <div className="flex flex-col min-h-screen">
-        <Header />
-        <main className="flex-1 container mx-auto p-4 md:p-8 flex items-center justify-center">
-            <Card className="w-full max-w-md">
-                <CardHeader>
-                    <CardTitle>Unirse a la Partida</CardTitle>
-                    <CardDescription>Introduce tu nombre para entrar al lobby de la partida: <strong>{gameId}</strong></CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                     <Input
-                        type="text"
-                        placeholder="Tu nombre"
-                        value={playerName}
-                        onChange={(e) => setPlayerName(e.target.value)}
-                        onKeyDown={(e) => e.key === 'Enter' && handleJoinGame()}
-                    />
-                    <Button onClick={handleJoinGame} className="w-full" disabled={!playerName.trim()}>
-                        <LogIn className="mr-2"/>
-                        Unirse al Lobby
-                    </Button>
-                </CardContent>
-            </Card>
-        </main>
-       </div>
-    );
-  }
-  
   const renderLobby = () => (
     <Card className="w-full max-w-2xl mx-auto">
         <CardHeader>

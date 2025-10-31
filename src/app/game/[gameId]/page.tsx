@@ -1,10 +1,11 @@
 
+
 "use client";
 
 import { useState, useEffect, useMemo, Suspense } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { doc, onSnapshot, setDoc, getDoc, updateDoc, runTransaction, deleteDoc } from 'firebase/firestore';
-import type { Game, Player, Phrase, Guess, GameMode } from '@/lib/types';
+import type { Game, Player, Phrase, Guess, GameMode, TwoTruthsOneLieStatement } from '@/lib/types';
 import { getAnonymizedPhrases } from '@/app/actions';
 import { Header } from '@/components/header';
 import { Button } from '@/components/ui/button';
@@ -16,6 +17,8 @@ import { Badge } from '@/components/ui/badge';
 import { Users, LogIn, Send, Hourglass, Gamepad2, CheckCircle, Lightbulb, Trophy, Star, Home, PartyPopper, XCircle } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+import { Label } from '@/components/ui/label';
 import { useFirestore } from '@/firebase';
 import { errorEmitter } from '@/firebase/error-emitter';
 import { FirestorePermissionError } from '@/firebase/errors';
@@ -37,6 +40,10 @@ function GamePageContent() {
   const [phrase, setPhrase] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [guesses, setGuesses] = useState<Record<string, string>>({});
+  
+  // State for "Two Truths, One Lie"
+  const [statements, setStatements] = useState<[string, string, string]>(['', '', '']);
+  const [lieIndex, setLieIndex] = useState<number | null>(null);
 
   useEffect(() => {
     if (!gameId || !firestore) return;
@@ -62,17 +69,22 @@ function GamePageContent() {
             }
           }
           
-          if (gameData.gameMode === 'who-is-who') {
-              if (gameData?.phase === 'submission' && gameData.players.every(p => p.hasSubmitted)) {
-                  const allPhrasesCount = gameData.players.length;
-                  if (gameData.phrases?.length === allPhrasesCount) {
+          if (gameData.players.every(p => p.hasSubmitted)) {
+              if (gameData.gameMode === 'who-is-who') {
+                  if (gameData.phase === 'submission' && gameData.phrases?.length === gameData.players.length) {
+                      updateDoc(gameRef, { phase: 'guessing' });
+                  }
+              } else if (gameData.gameMode === 'two-truths-one-lie') {
+                  if (gameData.phase === 'submission' && gameData.statements?.length === gameData.players.length) {
                       updateDoc(gameRef, { phase: 'guessing' });
                   }
               }
-              if (gameData?.phase === 'guessing' && gameData.players.every(p => p.hasGuessed)) {
-                updateDoc(gameRef, { phase: 'results' });
-              }
           }
+          
+          if (gameData.gameMode === 'who-is-who' && gameData?.phase === 'guessing' && gameData.players.every(p => p.hasGuessed)) {
+            updateDoc(gameRef, { phase: 'results' });
+          }
+
         } else {
             if (game) { 
                 toast({
@@ -113,24 +125,22 @@ function GamePageContent() {
 
   const handleJoinGame = async () => {
     if (!playerName.trim() || !gameId || !firestore) return;
-
-    let newPlayer: Player | null = null;
-    const playerId = crypto.randomUUID();
-    newPlayer = {
+  
+    const playerId = `player-${crypto.randomUUID()}`;
+    const newPlayer: Player = {
       id: playerId,
       name: playerName.trim(),
       hasSubmitted: false,
-      hasGuessed: false,
     };
-    
+  
     const gameRef = doc(firestore, 'games', gameId);
-
+  
     try {
       await runTransaction(firestore, async (transaction) => {
         const gameDoc = await transaction.get(gameRef);
-
+  
         if (!gameDoc.exists()) {
-           if (!gameModeFromURL) {
+          if (!gameModeFromURL) {
             toast({
               title: 'Error',
               description: 'No se ha especificado un modo de juego para esta nueva partida.',
@@ -142,37 +152,34 @@ function GamePageContent() {
           const newGame: Game = {
             id: gameId,
             phase: 'lobby',
-            players: [newPlayer!],
-            hostId: newPlayer!.id,
+            players: [newPlayer],
+            hostId: newPlayer.id,
             gameMode: gameModeFromURL,
           };
           transaction.set(gameRef, newGame);
         } else {
           // Game exists, join it.
-           const gameData = gameDoc.data() as Game;
-           const playerExists = gameData.players.some((p: Player) => p.name === playerName.trim());
-           if (playerExists) {
-              throw new Error(`El nombre "${playerName.trim()}" ya está en uso.`);
-           }
-          const updatedPlayers = [...gameData.players, newPlayer!];
+          const gameData = gameDoc.data() as Game;
+          if (gameData.players.some((p: Player) => p.name === newPlayer.name)) {
+            throw new Error(`El nombre "${newPlayer.name}" ya está en uso.`);
+          }
+          if (gameData.phase !== 'lobby') {
+             throw new Error('La partida ya ha comenzado.');
+          }
+          const updatedPlayers = [...gameData.players, newPlayer];
           transaction.update(gameRef, { players: updatedPlayers });
         }
       });
-
+  
       localStorage.setItem(`player-id-${gameId}`, newPlayer.id);
       setCurrentPlayer(newPlayer);
-      
-      const gameDocAfterJoin = await getDoc(gameRef);
-      if (gameDocAfterJoin.exists()) {
-        const gameData = gameDocAfterJoin.data() as Game;
-        setIsHost(gameData.hostId === newPlayer.id);
-      }
-
+      setIsHost(newPlayer.id === (await getDoc(gameRef)).data()?.hostId);
+  
       toast({
         title: '¡Bienvenido/a!',
         description: `Te has unido a la partida como ${newPlayer.name}.`,
       });
-
+  
     } catch (error: any) {
       console.error('Error al unirse a la partida:', error);
       toast({
@@ -180,6 +187,7 @@ function GamePageContent() {
         description: error.message || 'No se pudo unir a la partida. Inténtalo de nuevo.',
         variant: 'destructive',
       });
+      localStorage.removeItem(`player-id-${gameId}`);
       setCurrentPlayer(null);
       setIsHost(false);
     }
@@ -341,6 +349,62 @@ function GamePageContent() {
     }
   };
 
+  const handleTwoTruthsSubmission = async () => {
+    if (!currentPlayer || !firestore || statements.some(s => !s.trim()) || lieIndex === null) {
+      toast({
+        title: "Error",
+        description: "Por favor, completa las tres frases y marca una como la mentira.",
+        variant: "destructive"
+      });
+      return;
+    }
+    setIsSubmitting(true);
+
+    const newStatement: TwoTruthsOneLieStatement = {
+      authorId: currentPlayer.id,
+      statements: statements,
+      lieIndex: lieIndex
+    };
+
+    try {
+      const gameRef = doc(firestore, 'games', gameId);
+      await runTransaction(firestore, async (transaction) => {
+        const gameDoc = await transaction.get(gameRef);
+        if (!gameDoc.exists()) throw new Error("Game not found");
+        
+        const currentStatements = gameDoc.data().statements || [];
+        const updatedPlayers = gameDoc.data().players.map((p: Player) => 
+            p.id === currentPlayer.id ? { ...p, hasSubmitted: true } : p
+        );
+
+        transaction.update(gameRef, {
+            statements: [...currentStatements, newStatement],
+            players: updatedPlayers
+        });
+      });
+
+      toast({
+        title: "¡Frases enviadas!",
+        description: "Esperando al resto de jugadores...",
+      });
+
+    } catch (error: any) {
+      const gameRef = doc(firestore, 'games', gameId);
+      errorEmitter.emit('permission-error', new FirestorePermissionError({
+          path: gameRef.path,
+          operation: 'update',
+      }));
+      console.error("Error submitting statements:", error);
+      toast({
+          title: "Error",
+          description: error.message || "No se pudieron enviar tus frases.",
+          variant: "destructive"
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   const handleCreateNewGame = () => {
     router.push(`/`);
   };
@@ -468,11 +532,11 @@ function GamePageContent() {
   
   const renderSubmissionStatus = (phase: "submission" | "guessing") => (
     <Card className="w-full max-w-2xl mx-auto">
-       <CardHeader>
+      <CardHeader>
             <CardTitle>Esperando al resto</CardTitle>
             <CardDescription>La siguiente fase comenzará cuando todos hayan terminado.</CardDescription>
-       </CardHeader>
-       <CardContent>
+      </CardHeader>
+      <CardContent>
             <ul className="space-y-3">
                 {game.players.map(p => (
                     <li key={p.id} className="flex items-center justify-between p-3 bg-primary/10 rounded-lg">
@@ -489,12 +553,12 @@ function GamePageContent() {
                     </li>
                 ))}
             </ul>
-       </CardContent>
+      </CardContent>
     </Card>
- );
+  );
 
 
-  const renderSubmissionForm = () => (
+  const renderWhoIsWhoSubmissionForm = () => (
     <Card className="w-full max-w-2xl mx-auto">
       <CardHeader>
         <CardTitle>Envía tu Frase</CardTitle>
@@ -517,10 +581,66 @@ function GamePageContent() {
       </CardContent>
     </Card>
   );
+
+  const renderTwoTruthsOneLieSubmissionForm = () => {
+    const handleStatementChange = (index: number, value: string) => {
+        const newStatements = [...statements] as [string, string, string];
+        newStatements[index] = value;
+        setStatements(newStatements);
+    }
+    
+    const allFilled = statements.every(s => s.trim() !== '') && lieIndex !== null;
+
+    return (
+        <Card className="w-full max-w-2xl mx-auto">
+            <CardHeader>
+                <CardTitle>Dos Verdades y una Mentira</CardTitle>
+                <CardDescription>Escribe tres afirmaciones sobre ti. Dos deben ser verdaderas y una falsa. Marca la que sea mentira.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+                <RadioGroup value={lieIndex !== null ? `${lieIndex}` : undefined} onValueChange={(val) => setLieIndex(parseInt(val))}>
+                    {[0, 1, 2].map(index => (
+                        <div key={index} className="flex flex-col space-y-2">
+                             <Textarea
+                                placeholder={`Frase ${index + 1}...`}
+                                value={statements[index]}
+                                onChange={(e) => handleStatementChange(index, e.target.value)}
+                                disabled={isSubmitting}
+                                className="text-base"
+                            />
+                            <div className="flex items-center space-x-2">
+                                <RadioGroupItem value={`${index}`} id={`lie-${index}`} />
+                                <Label htmlFor={`lie-${index}`}>Esta es la mentira</Label>
+                            </div>
+                        </div>
+                    ))}
+                </RadioGroup>
+
+                 <Button onClick={handleTwoTruthsSubmission} className="w-full" disabled={!allFilled || isSubmitting}>
+                    {isSubmitting ? <Hourglass className="mr-2 animate-spin"/> : <Send className="mr-2"/>}
+                    {isSubmitting ? 'Enviando...' : 'Enviar Frases'}
+                </Button>
+            </CardContent>
+        </Card>
+    );
+  };
   
   const renderSubmission = () => {
     const playerHasSubmitted = game.players.find(p => p.id === currentPlayer.id)?.hasSubmitted;
-    return playerHasSubmitted ? renderSubmissionStatus("submission") : renderSubmissionForm();
+    
+    if (playerHasSubmitted) {
+        return renderSubmissionStatus("submission");
+    }
+
+    if (game.gameMode === 'who-is-who') {
+        return renderWhoIsWhoSubmissionForm();
+    }
+
+    if (game.gameMode === 'two-truths-one-lie') {
+        return renderTwoTruthsOneLieSubmissionForm();
+    }
+
+    return null;
   }
   
   const renderGuessingForm = () => {
@@ -575,7 +695,25 @@ function GamePageContent() {
   
   const renderGuessing = () => {
     const playerHasGuessed = game.players.find(p => p.id === currentPlayer.id)?.hasGuessed;
-    return playerHasGuessed ? renderSubmissionStatus("guessing") : renderGuessingForm();
+
+    if (game.gameMode === 'who-is-who') {
+        return playerHasGuessed ? renderSubmissionStatus("guessing") : renderGuessingForm();
+    }
+    
+    if (game.gameMode === 'two-truths-one-lie') {
+        return (
+             <Card>
+                <CardHeader>
+                    <CardTitle>Adivina la mentira</CardTitle>
+                </CardHeader>
+                <CardContent>
+                    <p>Fase de adivinanza en construcción.</p>
+                </CardContent>
+             </Card>
+        )
+    }
+    
+    return null;
   }
 
   const renderResults = () => {
@@ -682,13 +820,16 @@ function GamePageContent() {
     );
 };
 
-const renderWhoIsWhoGame = () => {
+const renderGameContent = () => {
     switch(game.phase) {
         case 'lobby': return renderLobby();
         case 'submission': return renderSubmission();
         case 'guessing': return renderGuessing();
-        case 'results': return renderResults();
-        default: return <p>Fase del juego desconocida</p>
+        case 'results': 
+            if (game.gameMode === 'who-is-who') return renderResults();
+            if (game.gameMode === 'two-truths-one-lie') return <p>Resultados en construcción</p>; // Placeholder
+            return <p>Fase de resultados desconocida</p>;
+        default: return <p>Fase del juego desconocida</p>;
     }
 }
 
@@ -697,17 +838,7 @@ const renderWhoIsWhoGame = () => {
      <div className="flex flex-col min-h-screen">
       <Header />
        <main className="flex-1 container mx-auto p-4 md:p-8">
-        {game.gameMode === 'who-is-who' && renderWhoIsWhoGame()}
-        {game.gameMode === 'two-truths-one-lie' && (
-             <Card>
-                <CardHeader>
-                    <CardTitle>Dos Verdades y una Mentira</CardTitle>
-                </CardHeader>
-                <CardContent>
-                    <p>Este modo de juego está en construcción.</p>
-                </CardContent>
-             </Card>
-        )}
+        {renderGameContent()}
        </main>
      </div>
   );
@@ -720,5 +851,3 @@ export default function GamePage() {
         </Suspense>
     )
 }
-
-    

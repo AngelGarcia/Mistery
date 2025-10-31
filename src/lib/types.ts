@@ -41,4 +41,6 @@ export type Game = {
 
   // "two-truths-one-lie" mode data
   statements?: TwoTruthsOneLieStatement[];
+  currentStatementIndex?: number; // Index for the statements array, indicating whose turn it is
+  twoTruthsGuesses?: Record<string, Record<string, number>>; // { [authorId]: { [guesserId]: guessIndex } }
 };

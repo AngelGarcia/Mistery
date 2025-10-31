@@ -14,7 +14,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { Badge } from '@/components/ui/badge';
-import { Users, LogIn, Send, Hourglass, Gamepad2, CheckCircle, Lightbulb, Trophy, Star, Home, PartyPopper, XCircle } from 'lucide-react';
+import { Users, LogIn, Send, Hourglass, Gamepad2, CheckCircle, Lightbulb, Trophy, Star, Home, PartyPopper, XCircle, HelpCircle } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
@@ -22,6 +22,7 @@ import { Label } from '@/components/ui/label';
 import { useFirestore } from '@/firebase';
 import { errorEmitter } from '@/firebase/error-emitter';
 import { FirestorePermissionError } from '@/firebase/errors';
+import { cn } from '@/lib/utils';
 
 
 function GamePageContent() {
@@ -70,13 +71,15 @@ function GamePageContent() {
           }
           
           if (gameData.players.every(p => p.hasSubmitted)) {
-              if (gameData.gameMode === 'who-is-who') {
-                  if (gameData.phase === 'submission' && gameData.phrases?.length === gameData.players.length) {
-                      updateDoc(gameRef, { phase: 'guessing' });
-                  }
-              } else if (gameData.gameMode === 'two-truths-one-lie') {
-                  if (gameData.phase === 'submission' && gameData.statements?.length === gameData.players.length) {
-                      updateDoc(gameRef, { phase: 'guessing' });
+              if (gameData.phase === 'submission' && isHost) {
+                  if (gameData.gameMode === 'who-is-who') {
+                      if (gameData.phrases?.length === gameData.players.length) {
+                          updateDoc(gameRef, { phase: 'guessing' });
+                      }
+                  } else if (gameData.gameMode === 'two-truths-one-lie') {
+                      if (gameData.statements?.length === gameData.players.length) {
+                          updateDoc(gameRef, { phase: 'guessing', currentStatementIndex: 0 });
+                      }
                   }
               }
           }
@@ -106,7 +109,7 @@ function GamePageContent() {
     );
 
     return () => unsubscribe();
-  }, [gameId, router, toast, firestore]);
+  }, [gameId, router, toast, firestore, isHost]);
 
   const shuffledPhrases = useMemo(() => {
     if (game?.phrases) {
@@ -125,74 +128,74 @@ function GamePageContent() {
 
   const handleJoinGame = async () => {
     if (!playerName.trim() || !gameId || !firestore) return;
-  
+
     const playerId = `player-${crypto.randomUUID()}`;
     const newPlayer: Player = {
       id: playerId,
       name: playerName.trim(),
       hasSubmitted: false,
     };
-  
+
     const gameRef = doc(firestore, 'games', gameId);
-  
+
     try {
-      await runTransaction(firestore, async (transaction) => {
-        const gameDoc = await transaction.get(gameRef);
-  
-        if (!gameDoc.exists()) {
-          if (!gameModeFromURL) {
-            toast({
-              title: 'Error',
-              description: 'No se ha especificado un modo de juego para esta nueva partida.',
-              variant: 'destructive',
-            });
-            throw new Error('Game mode not specified');
-          }
-          // It's a new game, create it.
-          const newGame: Game = {
-            id: gameId,
-            phase: 'lobby',
-            players: [newPlayer],
-            hostId: newPlayer.id,
-            gameMode: gameModeFromURL,
-          };
-          transaction.set(gameRef, newGame);
-          setIsHost(true);
-        } else {
-          // Game exists, join it.
-          const gameData = gameDoc.data() as Game;
-          if (gameData.players.some((p: Player) => p.name === newPlayer.name)) {
-            throw new Error(`El nombre "${newPlayer.name}" ya está en uso.`);
-          }
-          if (gameData.phase !== 'lobby') {
-             throw new Error('La partida ya ha comenzado.');
-          }
-          const updatedPlayers = [...gameData.players, newPlayer];
-          transaction.update(gameRef, { players: updatedPlayers });
-          setIsHost(false);
-        }
-      });
-  
-      localStorage.setItem(`player-id-${gameId}`, newPlayer.id);
-      setCurrentPlayer(newPlayer);
-  
-      toast({
-        title: '¡Bienvenido/a!',
-        description: `Te has unido a la partida como ${newPlayer.name}.`,
-      });
-  
+        await runTransaction(firestore, async (transaction) => {
+            const gameDoc = await transaction.get(gameRef);
+            if (!gameDoc.exists()) {
+                if (!gameModeFromURL) {
+                    toast({
+                        title: 'Error',
+                        description: 'No se ha especificado un modo de juego para esta nueva partida.',
+                        variant: 'destructive',
+                    });
+                    throw new Error('Game mode not specified');
+                }
+                const newGame: Game = {
+                    id: gameId,
+                    phase: 'lobby',
+                    players: [newPlayer],
+                    hostId: newPlayer.id,
+                    gameMode: gameModeFromURL,
+                    currentStatementIndex: 0,
+                    statements: [],
+                    twoTruthsGuesses: {},
+                };
+                transaction.set(gameRef, newGame);
+                setIsHost(true);
+            } else {
+                const gameData = gameDoc.data() as Game;
+                if (gameData.players.some((p: Player) => p.name === newPlayer.name)) {
+                    throw new Error(`El nombre "${newPlayer.name}" ya está en uso.`);
+                }
+                if (gameData.phase !== 'lobby') {
+                    throw new Error('La partida ya ha comenzado.');
+                }
+                const updatedPlayers = [...gameData.players, newPlayer];
+                transaction.update(gameRef, { players: updatedPlayers });
+                setIsHost(false);
+            }
+        });
+
+        localStorage.setItem(`player-id-${gameId}`, newPlayer.id);
+        setCurrentPlayer(newPlayer);
+
+        toast({
+            title: '¡Bienvenido/a!',
+            description: `Te has unido a la partida como ${newPlayer.name}.`,
+        });
+
     } catch (error: any) {
-      console.error('Error al unirse a la partida:', error);
-      toast({
-        title: 'Error al unirse',
-        description: error.message || 'No se pudo unir a la partida. Inténtalo de nuevo.',
-        variant: 'destructive',
-      });
-      localStorage.removeItem(`player-id-${gameId}`);
-      setCurrentPlayer(null);
-      setIsHost(false);
+        console.error('Error al unirse a la partida:', error);
+        toast({
+            title: 'Error al unirse',
+            description: error.message || 'No se pudo unir a la partida. Inténtalo de nuevo.',
+            variant: 'destructive',
+        });
+        localStorage.removeItem(`player-id-${gameId}`);
+        setCurrentPlayer(null);
+        setIsHost(false);
     }
-  };
+};
 
   const handleStartGame = async () => {
     if (!isHost || !firestore) return;
@@ -407,6 +410,34 @@ function GamePageContent() {
       setIsSubmitting(false);
     }
   };
+
+    const handleLieGuess = async (authorId: string, guessIndex: number) => {
+        if (!currentPlayer || !game || !firestore) return;
+
+        const gameRef = doc(firestore, 'games', gameId);
+        const guessKey = `twoTruthsGuesses.${authorId}.${currentPlayer.id}`;
+
+        try {
+            await updateDoc(gameRef, {
+                [guessKey]: guessIndex
+            });
+            toast({
+                title: "¡Voto registrado!",
+                description: "Tu elección ha sido guardada. Esperando al resto...",
+            });
+        } catch (error) {
+            errorEmitter.emit('permission-error', new FirestorePermissionError({
+                path: gameRef.path,
+                operation: 'update',
+            }));
+            console.error("Error submitting lie guess:", error);
+            toast({
+                title: "Error al votar",
+                description: "No se pudo registrar tu voto.",
+                variant: "destructive"
+            });
+        }
+    };
 
   const handleCreateNewGame = () => {
     router.push(`/`);
@@ -713,25 +744,108 @@ function GamePageContent() {
         </Card>
     );
   };
+
+  const renderTwoTruthsGuessing = () => {
+    if (!game || !currentPlayer || game.statements === undefined || game.currentStatementIndex === undefined) {
+        return <p>Cargando...</p>;
+    }
+
+    const currentStatementData = game.statements[game.currentStatementIndex];
+    if (!currentStatementData) {
+        return <p>Esperando al siguiente jugador...</p>;
+    }
+
+    const author = game.players.find(p => p.id === currentStatementData.authorId);
+    if (!author) return <p>Error: No se encuentra al autor.</p>;
+
+    const isMyTurnToBeGuessed = author.id === currentPlayer.id;
+
+    // Use a memoized shuffled array for the current round
+    const shuffledStatements = useMemo(() => {
+        if (!currentStatementData) return [];
+        const seed = gameId + currentStatementData.authorId;
+        let seededRandom = 0;
+        for (let i = 0; i < seed.length; i++) {
+            seededRandom += seed.charCodeAt(i);
+        }
+        const random = () => {
+            const x = Math.sin(seededRandom++) * 10000;
+            return x - Math.floor(x);
+        };
+        return [...currentStatementData.statements]
+            .map((statement, index) => ({ statement, originalIndex: index }))
+            .sort(() => random() - 0.5);
+    }, [gameId, currentStatementData]);
+
+
+    if (isMyTurnToBeGuessed) {
+        return (
+            <Card className="w-full max-w-2xl mx-auto">
+                <CardHeader>
+                    <CardTitle>¡Es tu turno!</CardTitle>
+                    <CardDescription>El resto de jugadores están intentando adivinar tu mentira.</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                    <p className="font-semibold">Tus frases:</p>
+                    <ul className="list-disc list-inside space-y-2">
+                        {currentStatementData.statements.map((s, i) => (
+                            <li key={i} className={i === currentStatementData.lieIndex ? 'text-red-500 font-bold' : ''}>{s}</li>
+                        ))}
+                    </ul>
+                     <div className="flex items-center justify-center pt-4 text-muted-foreground">
+                        <Hourglass className="mr-2 animate-spin" />
+                        <span>Esperando votos...</span>
+                    </div>
+                </CardContent>
+            </Card>
+        )
+    }
+
+    const currentGuessesForAuthor = game.twoTruthsGuesses?.[author.id] || {};
+    const myGuess = currentGuessesForAuthor[currentPlayer.id];
+    const hasGuessed = myGuess !== undefined;
+
+    return (
+        <Card className="w-full max-w-4xl mx-auto">
+            <CardHeader>
+                <CardTitle>Adivina la mentira de {author.name}</CardTitle>
+                <CardDescription>Lee las tres afirmaciones y haz clic en la que creas que es falsa. ¡Solo tienes un intento!</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    {shuffledStatements.map(({ statement, originalIndex }, displayIndex) => (
+                        <Card
+                            key={displayIndex}
+                            onClick={() => !hasGuessed && handleLieGuess(author.id, originalIndex)}
+                            className={cn(
+                                "flex flex-col justify-center p-6 min-h-[150px] text-center transition-all",
+                                hasGuessed ? "cursor-not-allowed" : "cursor-pointer hover:shadow-lg hover:-translate-y-1",
+                                myGuess === originalIndex && "ring-2 ring-primary ring-offset-2 shadow-lg bg-primary/10",
+                                hasGuessed && myGuess !== originalIndex && "opacity-60"
+                            )}
+                        >
+                           <p className="text-lg">{statement}</p>
+                        </Card>
+                    ))}
+                </div>
+                 {hasGuessed && (
+                    <div className="text-center text-muted-foreground pt-4">
+                        <p>¡Voto registrado! Esperando a los demás jugadores.</p>
+                    </div>
+                )}
+            </CardContent>
+        </Card>
+    );
+};
   
   const renderGuessing = () => {
-    const playerHasGuessed = game.players.find(p => p.id === currentPlayer.id)?.hasGuessed;
-
     if (game.gameMode === 'who-is-who') {
+        const playerHasGuessed = game.players.find(p => p.id === currentPlayer.id)?.hasGuessed;
         return playerHasGuessed ? renderSubmissionStatus("guessing") : renderGuessingForm();
     }
     
     if (game.gameMode === 'two-truths-one-lie') {
-        return (
-             <Card>
-                <CardHeader>
-                    <CardTitle>Adivina la mentira</CardTitle>
-                </CardHeader>
-                <CardContent>
-                    <p>Fase de adivinanza en construcción.</p>
-                </CardContent>
-             </Card>
-        )
+        return renderTwoTruthsGuessing();
     }
     
     return null;

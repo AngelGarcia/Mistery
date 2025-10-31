@@ -87,6 +87,32 @@ function GamePageContent() {
             updateDoc(gameRef, { phase: 'results' });
           }
 
+          // Logic to advance round in "Two Truths, One Lie"
+          if (isHost && gameData.gameMode === 'two-truths-one-lie' && gameData.phase === 'guessing' && gameData.statements && gameData.currentStatementIndex !== undefined) {
+                const currentStatementData = gameData.statements[gameData.currentStatementIndex];
+                if (currentStatementData) {
+                    const authorId = currentStatementData.authorId;
+                    const voters = gameData.players.filter(p => p.id !== authorId);
+                    const guessesForCurrentAuthor = gameData.twoTruthsGuesses?.[authorId] || {};
+                    const votesCount = Object.keys(guessesForCurrentAuthor).length;
+
+                    if (votesCount === voters.length) {
+                        const nextIndex = gameData.currentStatementIndex + 1;
+                        if (nextIndex < gameData.statements.length) {
+                            // setTimeout to allow players to see the result briefly
+                            setTimeout(() => {
+                                updateDoc(gameRef, { currentStatementIndex: nextIndex });
+                            }, 3000); // 3-second delay
+                        } else {
+                           setTimeout(() => {
+                                updateDoc(gameRef, { phase: 'results' });
+                            }, 3000); // 3-second delay
+                        }
+                    }
+                }
+            }
+
+
         } else {
             if (game) { 
                 toast({
@@ -108,7 +134,7 @@ function GamePageContent() {
     );
 
     return () => unsubscribe();
-  }, [gameId, router, toast, firestore, isHost]);
+  }, [gameId, router, toast, firestore, isHost, game]);
 
   const shuffledPhrases = useMemo(() => {
     if (game?.phrases) {
@@ -126,7 +152,7 @@ function GamePageContent() {
   }, [game?.phrases, gameId]);
 
   const shuffledTwoTruthsStatements = useMemo(() => {
-    if (!game || game.gameMode !== 'two-truths-one-lie' || game.statements === undefined || game.currentStatementIndex === undefined) {
+    if (!game || game.gameMode !== 'two-truths-one-lie' || !game.statements || game.currentStatementIndex === undefined) {
         return [];
     }
     const currentStatementData = game.statements[game.currentStatementIndex];
@@ -134,6 +160,7 @@ function GamePageContent() {
         return [];
     }
     
+    // Seeded random for consistent shuffling for all players
     const seed = gameId + currentStatementData.authorId;
     let seededRandom = 0;
     for (let i = 0; i < seed.length; i++) {
@@ -148,6 +175,7 @@ function GamePageContent() {
         .map((statement, index) => ({ statement, originalIndex: index }))
         .sort(() => random() - 0.5);
   }, [game, gameId]);
+
 
   const handleJoinGame = async () => {
     if (!playerName.trim() || !gameId || !firestore) return;
@@ -184,7 +212,6 @@ function GamePageContent() {
                     twoTruthsGuesses: {},
                 };
                 transaction.set(gameRef, newGame);
-                setIsHost(true);
             } else {
                 const gameData = gameDoc.data() as Game;
                 if (gameData.players.some((p: Player) => p.name === newPlayer.name)) {
@@ -195,12 +222,18 @@ function GamePageContent() {
                 }
                 const updatedPlayers = [...gameData.players, newPlayer];
                 transaction.update(gameRef, { players: updatedPlayers });
-                setIsHost(false);
             }
         });
 
         localStorage.setItem(`player-id-${gameId}`, newPlayer.id);
         setCurrentPlayer(newPlayer);
+        // We can determine host status on client-side after transaction
+        const finalGameDoc = await getDoc(gameRef);
+        if (finalGameDoc.exists() && finalGameDoc.data().hostId === newPlayer.id) {
+            setIsHost(true);
+        } else {
+            setIsHost(false);
+        }
 
         toast({
             title: '¡Bienvenido/a!',
@@ -590,8 +623,8 @@ function GamePageContent() {
   const renderSubmissionStatus = (phase: "submission" | "guessing") => (
     <Card className="w-full max-w-2xl mx-auto">
         <CardHeader>
-            <CardTitle>Esperando al resto</CardTitle>
-            <CardDescription>La siguiente fase comenzará cuando todos hayan terminado.</CardDescription>
+             <CardTitle>Esperando al resto</CardTitle>
+             <CardDescription>La siguiente fase comenzará cuando todos hayan terminado.</CardDescription>
         </CardHeader>
         <CardContent>
             <ul className="space-y-3">
@@ -769,7 +802,7 @@ function GamePageContent() {
   };
 
   const renderTwoTruthsGuessing = () => {
-    if (!game || !currentPlayer || game.statements === undefined || game.currentStatementIndex === undefined) {
+    if (!game || !currentPlayer || !game.statements || game.currentStatementIndex === undefined) {
         return <p>Cargando...</p>;
     }
 
@@ -991,5 +1024,7 @@ export default function GamePage() {
         </Suspense>
     )
 }
+
+    
 
     

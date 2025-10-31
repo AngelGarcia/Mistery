@@ -157,6 +157,7 @@ function GamePageContent() {
             gameMode: gameModeFromURL,
           };
           transaction.set(gameRef, newGame);
+          setIsHost(true);
         } else {
           // Game exists, join it.
           const gameData = gameDoc.data() as Game;
@@ -168,12 +169,12 @@ function GamePageContent() {
           }
           const updatedPlayers = [...gameData.players, newPlayer];
           transaction.update(gameRef, { players: updatedPlayers });
+          setIsHost(false);
         }
       });
   
       localStorage.setItem(`player-id-${gameId}`, newPlayer.id);
       setCurrentPlayer(newPlayer);
-      setIsHost(newPlayer.id === (await getDoc(gameRef)).data()?.hostId);
   
       toast({
         title: '¡Bienvenido/a!',
@@ -223,19 +224,22 @@ function GamePageContent() {
   const handleCancelGame = async () => {
     if (!isHost || !firestore) return;
     const gameRef = doc(firestore, 'games', gameId);
-    deleteDoc(gameRef)
-        .catch((error) => {
-            errorEmitter.emit('permission-error', new FirestorePermissionError({
-                path: gameRef.path,
-                operation: 'delete',
-            }));
-            console.error("Error canceling game:", error);
-            toast({
-                title: "Error",
-                description: "No se pudo cancelar la partida.",
-                variant: "destructive",
-            });
+    await deleteDoc(gameRef)
+      .then(() => {
+        router.push('/');
+      })
+      .catch((error) => {
+        errorEmitter.emit('permission-error', new FirestorePermissionError({
+          path: gameRef.path,
+          operation: 'delete',
+        }));
+        console.error("Error canceling game:", error);
+        toast({
+          title: "Error",
+          description: "No se pudo cancelar la partida.",
+          variant: "destructive",
         });
+      });
   };
 
   const handleSubmission = async () => {

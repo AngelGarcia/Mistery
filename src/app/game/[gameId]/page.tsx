@@ -114,84 +114,74 @@ function GamePageContent() {
   const handleJoinGame = async () => {
     if (!playerName.trim() || !gameId || !firestore) return;
 
-    const gameRef = doc(firestore, 'games', gameId);
     let newPlayer: Player | null = null;
-    let isNewGame = false;
+    const playerId = crypto.randomUUID();
+    newPlayer = {
+      id: playerId,
+      name: playerName.trim(),
+      hasSubmitted: false,
+      hasGuessed: false,
+    };
     
+    const gameRef = doc(firestore, 'games', gameId);
+
     try {
-        await runTransaction(firestore, async (transaction) => {
-            const gameDoc = await transaction.get(gameRef);
-            
-            newPlayer = {
-                id: crypto.randomUUID(),
-                name: playerName.trim(),
-                hasSubmitted: false,
-                hasGuessed: false,
-            };
+      await runTransaction(firestore, async (transaction) => {
+        const gameDoc = await transaction.get(gameRef);
 
-            if (!gameDoc.exists()) {
-                if (!gameModeFromURL) {
-                    toast({
-                        title: "Error",
-                        description: "No se ha especificado un modo de juego para esta nueva partida.",
-                        variant: "destructive",
-                    });
-                    throw new Error("Game mode not specified");
-                }
-                isNewGame = true;
-                const newGame: Game = {
-                    id: gameId,
-                    phase: 'lobby',
-                    players: [newPlayer],
-                    hostId: newPlayer.id,
-                    gameMode: gameModeFromURL,
-                };
-                transaction.set(gameRef, newGame);
-            } else {
-                const gameData = gameDoc.data() as Game;
-                const players = gameData.players || [];
-
-                if (players.some((p: Player) => p.name === newPlayer!.name)) {
-                    throw new Error(`El nombre "${newPlayer!.name}" ya está en uso.`);
-                }
-
-                const updateData: Partial<Game> = {
-                    players: [...players, newPlayer]
-                };
-
-                if (!gameData.hostId) {
-                    updateData.hostId = newPlayer.id;
-                }
-
-                transaction.update(gameRef, updateData);
-            }
-        });
-
-        if (newPlayer) {
-            localStorage.setItem(`player-id-${gameId}`, newPlayer.id);
-            setCurrentPlayer(newPlayer);
-            
-            if (isNewGame) {
-                setIsHost(true);
-            }
-
+        if (!gameDoc.exists()) {
+           if (!gameModeFromURL) {
             toast({
-                title: "¡Bienvenido/a!",
-                description: `Te has unido a la partida como ${newPlayer.name}.`,
+              title: 'Error',
+              description: 'No se ha especificado un modo de juego para esta nueva partida.',
+              variant: 'destructive',
             });
+            throw new Error('Game mode not specified');
+          }
+          // It's a new game, create it.
+          const newGame: Game = {
+            id: gameId,
+            phase: 'lobby',
+            players: [newPlayer!],
+            hostId: newPlayer!.id,
+            gameMode: gameModeFromURL,
+          };
+          transaction.set(gameRef, newGame);
+        } else {
+          // Game exists, join it.
+           const gameData = gameDoc.data() as Game;
+           const playerExists = gameData.players.some((p: Player) => p.name === playerName.trim());
+           if (playerExists) {
+              throw new Error(`El nombre "${playerName.trim()}" ya está en uso.`);
+           }
+          const updatedPlayers = [...gameData.players, newPlayer!];
+          transaction.update(gameRef, { players: updatedPlayers });
         }
+      });
+
+      localStorage.setItem(`player-id-${gameId}`, newPlayer.id);
+      setCurrentPlayer(newPlayer);
+      
+      const gameDocAfterJoin = await getDoc(gameRef);
+      if (gameDocAfterJoin.exists()) {
+        const gameData = gameDocAfterJoin.data() as Game;
+        setIsHost(gameData.hostId === newPlayer.id);
+      }
+
+      toast({
+        title: '¡Bienvenido/a!',
+        description: `Te has unido a la partida como ${newPlayer.name}.`,
+      });
 
     } catch (error: any) {
-        errorEmitter.emit('permission-error', new FirestorePermissionError({
-            path: gameRef.path,
-            operation: 'write',
-        }));
-        console.error("Error al unirse a la partida:", error);
-        toast({
-            title: "Error",
-            description: error.message || "No se pudo unir a la partida. Inténtalo de nuevo.",
-            variant: "destructive",
-        });
+      console.error('Error al unirse a la partida:', error);
+      toast({
+        title: 'Error al unirse',
+        description: error.message || 'No se pudo unir a la partida. Inténtalo de nuevo.',
+        variant: 'destructive',
+      });
+      setCurrentPlayer(null);
+      setIsHost(false);
     }
   };
 
@@ -499,7 +489,7 @@ function GamePageContent() {
                     </li>
                 ))}
             </ul>
-       CardContent>
+       </CardContent>
     </Card>
  );
 
@@ -511,7 +501,7 @@ function GamePageContent() {
         <CardDescription>
           Escribe una frase personal y única. Será anonimizada y el resto
           de jugadores tendrán que adivinar que es tuya.
-        CardDescription>
+        </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         <Textarea 
@@ -616,7 +606,7 @@ function GamePageContent() {
                 <CardTitle className="flex items-center gap-2 text-2xl">
                     <Trophy className="text-amber-500"/>
                     ¡Resultados Finales!
-                CardTitle>
+                </CardTitle>
                 <CardDescription>Veamos quién conoce mejor a los demás.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-8">

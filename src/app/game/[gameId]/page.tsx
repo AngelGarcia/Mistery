@@ -125,6 +125,30 @@ function GamePageContent() {
     return [];
   }, [game?.phrases, gameId]);
 
+  const shuffledTwoTruthsStatements = useMemo(() => {
+    if (!game || game.gameMode !== 'two-truths-one-lie' || game.statements === undefined || game.currentStatementIndex === undefined) {
+        return [];
+    }
+    const currentStatementData = game.statements[game.currentStatementIndex];
+    if (!currentStatementData) {
+        return [];
+    }
+    
+    const seed = gameId + currentStatementData.authorId;
+    let seededRandom = 0;
+    for (let i = 0; i < seed.length; i++) {
+        seededRandom += seed.charCodeAt(i);
+    }
+    const random = () => {
+        const x = Math.sin(seededRandom++) * 10000;
+        return x - Math.floor(x);
+    };
+
+    return [...currentStatementData.statements]
+        .map((statement, index) => ({ statement, originalIndex: index }))
+        .sort(() => random() - 0.5);
+  }, [game, gameId]);
+
   const handleJoinGame = async () => {
     if (!playerName.trim() || !gameId || !firestore) return;
 
@@ -759,24 +783,6 @@ function GamePageContent() {
 
     const isMyTurnToBeGuessed = author.id === currentPlayer.id;
 
-    // Use a memoized shuffled array for the current round
-    const shuffledStatements = useMemo(() => {
-        if (!currentStatementData) return [];
-        const seed = gameId + currentStatementData.authorId;
-        let seededRandom = 0;
-        for (let i = 0; i < seed.length; i++) {
-            seededRandom += seed.charCodeAt(i);
-        }
-        const random = () => {
-            const x = Math.sin(seededRandom++) * 10000;
-            return x - Math.floor(x);
-        };
-        return [...currentStatementData.statements]
-            .map((statement, index) => ({ statement, originalIndex: index }))
-            .sort(() => random() - 0.5);
-    }, [gameId, currentStatementData]);
-
-
     if (isMyTurnToBeGuessed) {
         return (
             <Card className="w-full max-w-2xl mx-auto">
@@ -812,7 +818,7 @@ function GamePageContent() {
             </CardHeader>
             <CardContent className="space-y-6">
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    {shuffledStatements.map(({ statement, originalIndex }, displayIndex) => (
+                    {shuffledTwoTruthsStatements.map(({ statement, originalIndex }, displayIndex) => (
                         <Card
                             key={displayIndex}
                             onClick={() => !hasGuessed && handleLieGuess(author.id, originalIndex)}

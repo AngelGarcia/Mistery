@@ -13,7 +13,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { Badge } from '@/components/ui/badge';
-import { Users, LogIn, Send, Hourglass, Gamepad2, CheckCircle, Lightbulb, Trophy, Star, Home, PartyPopper, XCircle, HelpCircle } from 'lucide-react';
+import { Users, LogIn, Send, Hourglass, Gamepad2, CheckCircle, Lightbulb, Trophy, Star, Home, PartyPopper, XCircle, HelpCircle, Check, Circle } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
@@ -45,6 +45,7 @@ function GamePageContent() {
   const [statements, setStatements] = useState<[string, string, string]>(['', '', '']);
   const LIE_INDEX = 2; // The lie is always the last statement
 
+  // Main listener for game state changes from Firestore
   useEffect(() => {
     if (!gameId || !firestore) return;
 
@@ -68,87 +69,88 @@ function GamePageContent() {
               setIsHost(false);
             }
           }
-          
-          if (gameData.players.every(p => p.hasSubmitted)) {
-              if (gameData.phase === 'submission' && isHost) {
-                  if (gameData.gameMode === 'who-is-who') {
-                      if (gameData.phrases?.length === gameData.players.length) {
-                          updateDoc(gameRef, { phase: 'guessing' });
-                      }
-                  } else if (gameData.gameMode === 'two-truths-one-lie') {
-                      if (gameData.statements?.length === gameData.players.length) {
-                          updateDoc(gameRef, { phase: 'guessing', currentStatementIndex: 0 });
-                      }
-                  }
-              }
-          }
-          
-          if (gameData.gameMode === 'who-is-who' && gameData?.phase === 'guessing' && gameData.players.every(p => p.hasGuessed)) {
-            updateDoc(gameRef, { phase: 'results' });
-          }
-
-          // Logic to advance round in "Two Truths, One Lie"
-          if (isHost && gameData.gameMode === 'two-truths-one-lie' && gameData.phase === 'guessing' && gameData.statements && gameData.currentStatementIndex !== undefined) {
-                const currentStatementData = gameData.statements[gameData.currentStatementIndex];
-                if (currentStatementData) {
-                    const authorId = currentStatementData.authorId;
-                    const voters = gameData.players.filter(p => p.id !== authorId);
-                    const guessesForCurrentAuthor = gameData.twoTruthsGuesses?.[authorId] || {};
-                    const votesCount = Object.keys(guessesForCurrentAuthor).length;
-
-                    if (votesCount === voters.length) {
-                        const nextIndex = gameData.currentStatementIndex + 1;
-                        if (nextIndex < gameData.statements.length) {
-                            // setTimeout to allow players to see the result briefly
-                            setTimeout(() => {
-                                updateDoc(gameRef, { currentStatementIndex: nextIndex });
-                            }, 3000); // 3-second delay
-                        } else {
-                           setTimeout(() => {
-                                updateDoc(gameRef, { phase: 'results' });
-                            }, 3000); // 3-second delay
-                        }
-                    }
-                }
-            }
-
-
         } else {
-            if (game) { 
-                toast({
-                    title: "Partida cancelada",
-                    description: "La partida ha sido cancelada por el anfitrión.",
-                });
-                router.push('/');
-            }
+            toast({
+                title: "Partida cancelada",
+                description: "La partida ha sido cancelada por el anfitrión.",
+            });
+            router.push('/');
             setGame(null);
         }
       }, 
-      async (error) => {
+      (error) => {
+        console.error("Error en snapshot de partida:", error);
         errorEmitter.emit('permission-error', new FirestorePermissionError({
             path: gameRef.path,
             operation: 'get',
-          }));
-        console.error("Error en snapshot de partida:", error);
+        }));
       }
     );
 
     return () => unsubscribe();
-  }, [gameId, router, toast, firestore, isHost, game]);
+  }, [gameId, router, toast, firestore]);
+  
+  // Effect to handle automatic game phase progression
+  useEffect(() => {
+      if (!game || !isHost || !firestore) return;
+
+      const gameRef = doc(firestore, 'games', gameId);
+
+      // --- Submission Phase complete ---
+      if (game.phase === 'submission' && game.players.every(p => p.hasSubmitted)) {
+          if (game.gameMode === 'who-is-who') {
+              if (game.phrases?.length === game.players.length) {
+                  updateDoc(gameRef, { phase: 'guessing' });
+              }
+          } else if (game.gameMode === 'two-truths-one-lie') {
+              if (game.statements?.length === game.players.length) {
+                  updateDoc(gameRef, { phase: 'guessing', currentStatementIndex: 0 });
+              }
+          }
+      }
+
+      // --- Who is Who Guessing Phase complete ---
+      if (game.gameMode === 'who-is-who' && game.phase === 'guessing' && game.players.every(p => p.hasGuessed)) {
+          updateDoc(gameRef, { phase: 'results' });
+      }
+
+      // --- Two Truths One Lie Guessing Phase round complete ---
+      if (game.gameMode === 'two-truths-one-lie' && game.phase === 'guessing' && game.statements && game.currentStatementIndex !== undefined) {
+          const currentStatementData = game.statements[game.currentStatementIndex];
+          if (currentStatementData) {
+              const authorId = currentStatementData.authorId;
+              const voters = game.players.filter(p => p.id !== authorId);
+              const guessesForCurrentAuthor = game.twoTruthsGuesses?.[authorId] || {};
+              const votesCount = Object.keys(guessesForCurrentAuthor).length;
+
+              if (votesCount === voters.length) {
+                  const nextIndex = game.currentStatementIndex + 1;
+                  // Use a timeout to allow players to see the result briefly before advancing
+                  setTimeout(() => {
+                      if (nextIndex < game.statements!.length) {
+                          updateDoc(gameRef, { currentStatementIndex: nextIndex });
+                      } else {
+                          updateDoc(gameRef, { phase: 'results' });
+                      }
+                  }, 3000); // 3-second delay
+              }
+          }
+      }
+  }, [game, isHost, firestore, gameId]);
+
 
   const shuffledPhrases = useMemo(() => {
-    if (game?.phrases) {
-        let seed = 0;
-        for (let i = 0; i < gameId.length; i++) {
-            seed += gameId.charCodeAt(i);
-        }
-        const random = () => {
-            const x = Math.sin(seed++) * 10000;
-            return x - Math.floor(x);
-        };
-        return [...game.phrases].sort(() => random() - 0.5);
+    if (!game || !game.phrases) return [];
+    // Seeded random for consistent shuffling for all players
+    let seed = 0;
+    for (let i = 0; i < gameId.length; i++) {
+        seed += gameId.charCodeAt(i);
     }
-    return [];
+    const random = () => {
+        const x = Math.sin(seed++) * 10000;
+        return x - Math.floor(x);
+    };
+    return [...game.phrases].sort(() => random() - 0.5);
   }, [game?.phrases, gameId]);
 
   const shuffledTwoTruthsStatements = useMemo(() => {
@@ -227,7 +229,8 @@ function GamePageContent() {
 
         localStorage.setItem(`player-id-${gameId}`, newPlayer.id);
         setCurrentPlayer(newPlayer);
-        // We can determine host status on client-side after transaction
+        
+        // This is now safe as the transaction is complete
         const finalGameDoc = await getDoc(gameRef);
         if (finalGameDoc.exists() && finalGameDoc.data().hostId === newPlayer.id) {
             setIsHost(true);
@@ -285,6 +288,7 @@ function GamePageContent() {
     const gameRef = doc(firestore, 'games', gameId);
     try {
         await deleteDoc(gameRef);
+        // Force redirect for the host
         router.push('/');
     } catch (error) {
         errorEmitter.emit('permission-error', new FirestorePermissionError({
@@ -803,12 +807,12 @@ function GamePageContent() {
 
   const renderTwoTruthsGuessing = () => {
     if (!game || !currentPlayer || !game.statements || game.currentStatementIndex === undefined) {
-        return <p>Cargando...</p>;
+        return <div className="text-center"><Hourglass className="mx-auto animate-spin" /> Cargando...</div>;
     }
 
     const currentStatementData = game.statements[game.currentStatementIndex];
     if (!currentStatementData) {
-        return <p>Esperando al siguiente jugador...</p>;
+        return <div className="text-center">Esperando al siguiente jugador...</div>;
     }
 
     const author = game.players.find(p => p.id === currentStatementData.authorId);
@@ -889,7 +893,7 @@ function GamePageContent() {
     return null;
   }
 
-  const renderResults = () => {
+  const renderWhoIsWhoResults = () => {
     if (!game || !game.phrases || !game.guesses) {
         return <p>Cargando resultados...</p>;
     }
@@ -993,14 +997,136 @@ function GamePageContent() {
     );
 };
 
+const renderTwoTruthsResults = () => {
+    if (!game || !game.statements || !game.twoTruthsGuesses) {
+        return <p>Cargando resultados...</p>;
+    }
+
+    // Calculate scores
+    const playerScores: Record<string, number> = game.players.reduce((acc, p) => ({ ...acc, [p.id]: 0 }), {});
+
+    game.statements.forEach(statementSet => {
+        const authorId = statementSet.authorId;
+        const lieIndex = statementSet.lieIndex;
+        const guessesForAuthor = game.twoTruthsGuesses?.[authorId] || {};
+
+        game.players.forEach(player => {
+            // Player is the author: gets points if others fail
+            if (player.id === authorId) {
+                const otherPlayers = game.players.filter(p => p.id !== authorId);
+                otherPlayers.forEach(otherPlayer => {
+                    const guess = guessesForAuthor[otherPlayer.id];
+                    if (guess === undefined || guess !== lieIndex) {
+                        playerScores[authorId]++; // Point for stumping a player
+                    }
+                });
+            } 
+            // Player is a guesser: gets a point for guessing correctly
+            else {
+                const guess = guessesForAuthor[player.id];
+                if (guess === lieIndex) {
+                    playerScores[player.id]++; // Point for correct guess
+                }
+            }
+        });
+    });
+
+    const sortedPlayers = [...game.players].sort((a, b) => playerScores[b.id] - playerScores[a.id]);
+    const maxScore = sortedPlayers.length > 0 ? playerScores[sortedPlayers[0].id] : 0;
+    const getPlayerName = (playerId: string) => game.players.find(p => p.id === playerId)?.name || 'Desconocido';
+
+    return (
+        <Card className="w-full max-w-4xl mx-auto">
+            <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-2xl">
+                    <Trophy className="text-amber-500"/>
+                    ¡Resultados Finales!
+                </CardTitle>
+                <CardDescription>¡Veamos quién es el mejor mentiroso y el mejor detective!</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-8">
+                 <div>
+                    <h3 className="text-lg font-semibold mb-4">Puntuaciones</h3>
+                    <ul className="space-y-3">
+                        {sortedPlayers.map((player, index) => {
+                            const isWinner = playerScores[player.id] === maxScore && maxScore > 0;
+                            return (
+                                <li key={player.id} className="flex items-center justify-between p-3 bg-primary/10 rounded-lg">
+                                    <div className="flex items-center gap-3">
+                                        <span className={`font-bold text-lg w-6 text-center ${isWinner ? 'text-amber-500' : 'text-muted-foreground'}`}>{index + 1}</span>
+                                        <span className="font-medium">{player.name}</span>
+                                        {isWinner && <Star className="text-amber-500" size={20}/>}
+                                    </div>
+                                <Badge variant={isWinner ? "default" : "secondary"}>{playerScores[player.id]} Puntos</Badge>
+                               </li>
+                            )
+                        })}
+                    </ul>
+                </div>
+
+                <div>
+                    <h3 className="text-lg font-semibold mb-4">Resumen de Rondas</h3>
+                     <Accordion type="single" collapsible className="w-full">
+                        {game.statements.map((statementSet, idx) => (
+                             <AccordionItem key={idx} value={`statement-${idx}`}>
+                                <AccordionTrigger>
+                                    Ronda de <span className="font-semibold text-primary ml-1">{getPlayerName(statementSet.authorId)}</span>
+                                </AccordionTrigger>
+                                <AccordionContent>
+                                    <ul className="space-y-4">
+                                        {statementSet.statements.map((statement, statementIdx) => (
+                                            <li key={statementIdx} className={cn("p-3 rounded-md", statementIdx === statementSet.lieIndex ? "bg-red-100 dark:bg-red-900/30" : "bg-green-100 dark:bg-green-900/30")}>
+                                                <p className="font-medium">{statement}</p>
+                                                {statementIdx === statementSet.lieIndex && <p className="text-sm font-bold text-red-600 dark:text-red-400 mt-1">(La Mentira)</p>}
+                                            </li>
+                                        ))}
+                                    </ul>
+                                    <h4 className="font-semibold mt-4 mb-2">Votos:</h4>
+                                     <ul className="space-y-2 pl-4">
+                                        {game.players.map(guesser => {
+                                             if (guesser.id === statementSet.authorId) return null;
+                                             const guessIndex = game.twoTruthsGuesses?.[statementSet.authorId]?.[guesser.id];
+                                             const isCorrect = guessIndex === statementSet.lieIndex;
+                                             return (
+                                                <li key={guesser.id} className="text-sm flex items-center gap-2">
+                                                    <strong>{guesser.name}</strong> votó por la frase #{guessIndex !== undefined ? guessIndex + 1 : 'N/A'}:
+                                                    {guessIndex !== undefined ? (
+                                                        isCorrect ? <CheckCircle className="text-green-600" size={16}/> : <XCircle className="text-red-600" size={16}/>
+                                                    ) : (
+                                                        <span className="text-muted-foreground">No votó</span>
+                                                    )}
+                                                </li>
+                                             )
+                                        })}
+                                     </ul>
+                                </AccordionContent>
+                            </AccordionItem>
+                        ))}
+                    </Accordion>
+                </div>
+            </CardContent>
+            <CardFooter className="flex-col sm:flex-row justify-center gap-4 pt-6">
+                 <Button onClick={handleCreateNewGame}>
+                    <PartyPopper className="mr-2" />
+                    Crear Nueva Partida
+                </Button>
+                <Button variant="outline" onClick={() => router.push('/')}>
+                    <Home className="mr-2" />
+                    Volver al Inicio
+                </Button>
+            </CardFooter>
+        </Card>
+    );
+}
+
 const renderGameContent = () => {
     switch(game.phase) {
         case 'lobby': return renderLobby();
         case 'submission': return renderSubmission();
         case 'guessing': return renderGuessing();
         case 'results': 
-            if (game.gameMode === 'who-is-who') return renderResults();
-            if (game.gameMode === 'two-truths-one-lie') return <p>Resultados en construcción</p>; // Placeholder
+            if (game.gameMode === 'who-is-who') return renderWhoIsWhoResults();
+            if (game.gameMode === 'two-truths-one-lie') return renderTwoTruthsResults();
             return <p>Fase de resultados desconocida</p>;
         default: return <p>Fase del juego desconocida</p>;
     }
@@ -1019,12 +1145,10 @@ const renderGameContent = () => {
 
 export default function GamePage() {
     return (
-        <Suspense fallback={<div>Cargando...</div>}>
+        <Suspense fallback={<div className="flex items-center justify-center min-h-screen"><Hourglass className="animate-spin" /> <span className="ml-2">Cargando partida...</span></div>}>
             <GamePageContent />
         </Suspense>
     )
 }
-
-    
 
     
